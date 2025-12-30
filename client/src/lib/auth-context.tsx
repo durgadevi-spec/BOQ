@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import { setAuthToken } from "./api";
 
 export type UserRole = "admin" | "supplier" | "user" | "purchase_team" | "software_team" | null;
 
@@ -28,39 +29,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Mock auth provider: store user locally without server calls
+  // Update global token whenever token state changes
+  useEffect(() => {
+    setAuthToken(token);
+  }, [token]);
 
-  const login = async (username: string, _password: string) => {
+  const login = async (username: string, password: string) => {
     setIsLoading(true);
     setError(null);
-    // Mock behavior: accept any credentials, create a simple user
-    const userObj = { id: Math.random().toString(36).slice(2), username, role: username.includes("supplier") ? ("supplier" as const) : ("user" as const) };
-    setUser(userObj);
-    const fakeToken = `mock-${userObj.id}`;
-    setToken(fakeToken);
-    localStorage.setItem("authToken", fakeToken);
-    localStorage.setItem("authUser", JSON.stringify(userObj));
-    setIsLoading(false);
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      if (!res.ok) throw new Error('Login failed');
+      const { user: userObj, token: authToken } = await res.json();
+      setUser(userObj);
+      setToken(authToken);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const signup = async (username: string, _password: string, role: UserRole) => {
+  const signup = async (username: string, password: string, role: UserRole) => {
     setIsLoading(true);
     setError(null);
-    // Mock signup: create user locally
-    const userObj = { id: Math.random().toString(36).slice(2), username, role: role || ("user" as const) };
-    setUser(userObj);
-    const fakeToken = `mock-${userObj.id}`;
-    setToken(fakeToken);
-    localStorage.setItem("authToken", fakeToken);
-    localStorage.setItem("authUser", JSON.stringify(userObj));
-    setIsLoading(false);
+    try {
+      const res = await fetch(`${API_BASE}/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, role: role || 'user' })
+      });
+      if (!res.ok) throw new Error('Signup failed');
+      const { user: userObj, token: authToken } = await res.json();
+      setUser(userObj);
+      setToken(authToken);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const logout = () => {
     setUser(null);
     setToken(null);
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("authUser");
   };
 
   return (

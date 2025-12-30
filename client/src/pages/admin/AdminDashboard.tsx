@@ -31,8 +31,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  MapPin,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Link, useLocation } from "wouter";
 
 /* 🔴 REQUIRED ASTERISK */
 const Required = () => <span className="text-red-500 ml-1">*</span>;
@@ -47,16 +49,8 @@ const UNIT_OPTIONS = [
   "set",
   "nos",
 ];
-const CATEGORY_OPTIONS = [
-  "Civil",
-  "Plumbing",
-  "Electrical",
-  "Tiles",
-  "Doors",
-  "Paint",
-  "Hardware",
-  "Glass",
-];
+
+// Removed hardcoded CATEGORY_OPTIONS - will be dynamic now
 
 const COUNTRY_CODES = [
   { code: "+91", country: "India" },
@@ -67,7 +61,6 @@ const COUNTRY_CODES = [
   { code: "+81", country: "Japan" },
   { code: "+49", country: "Germany" },
 ];
-
 
 export default function AdminDashboard() {
   const { toast } = useToast();
@@ -80,51 +73,266 @@ export default function AdminDashboard() {
     approvalRequests,
     supportMessages,
     submitShopForApproval,
-    submitMaterialForApproval, // ✅ ADD THIS
+    submitMaterialForApproval,
     approveShop,
     rejectShop,
+    deleteShop,
+    deleteMaterial,
     addSupportMessage,
   } = useData();
 
   const {
-  materialApprovalRequests,
-  approveMaterial,
-  rejectMaterial,
-} = useData();
+    materialApprovalRequests,
+    approveMaterial,
+    rejectMaterial,
+  } = useData();
+  
   const [rejectReason, setRejectReason] = useState("");
   const [rejectingId, setRejectingId] = useState<string | null>(null);
 
+  // ==== CATEGORIES & SUBCATEGORIES (Admin/Software Team Created) ====
+  const [categories, setCategories] = useState<string[]>([]);
+  const [disabledCategories, setDisabledCategories] = useState<string[]>([]);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryValue, setEditingCategoryValue] = useState("");
+  const [subCategories, setSubCategories] = useState<any[]>([]);
 
-   // ==== LOCAL STORAGE STATES ====
-  const [materialRequests, setMaterialRequests] = useState(() => {
-    const saved = localStorage.getItem("materialApprovalRequests");
-    return saved ? JSON.parse(saved) : [];
+  // Load categories from API on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/categories');
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.categories) setCategories(data.categories);
+        }
+      } catch (e) {
+        console.warn('load categories failed', e);
+        // Default fallback if API fails
+        setCategories([
+          "Civil", "Flooring", "Doors & Windows", "Painting", "Electrical",
+          "Plumbing", "False Ceiling", "Blinds & Furnishing", "Metal & Steel Work",
+          "Fire Fighting", "Gypsum", "Plywood", "Glass"
+        ]);
+      }
+    })();
+  }, []);
+
+  // NEW CATEGORY/SUBCATEGORY INPUT
+  const [newCategory, setNewCategory] = useState("");
+  const [newSubCategory, setNewSubCategory] = useState("");
+  const [selectedCategoryForSubCategory, setSelectedCategoryForSubCategory] = useState("");
+
+  // Handle Add Category
+  const handleAddCategory = () => {
+    if (!newCategory.trim()) {
+      toast({
+        title: "Error",
+        description: "Category name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (categories.includes(newCategory)) {
+      toast({
+        title: "Error",
+        description: "This category already exists",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCategories((prev: string[]) => [...prev, newCategory]);
+    toast({
+      title: "Success",
+      description: `Category "${newCategory}" created`,
+    });
+    setNewCategory("");
+  };
+
+  // Handle Add SubCategory
+  const handleAddSubCategory = () => {
+    if (!newSubCategory.trim()) {
+      toast({
+        title: "Error",
+        description: "Sub-category name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!selectedCategoryForSubCategory) {
+      toast({
+        title: "Error",
+        description: "Please select a category first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const newSub = {
+      id: Math.random().toString(),
+      name: newSubCategory,
+      category: selectedCategoryForSubCategory,
+      createdAt: new Date().toISOString(),
+    };
+
+    setSubCategories((prev: any[]) => [...prev, newSub]);
+    toast({
+      title: "Success",
+      description: `Sub-category "${newSubCategory}" created under ${selectedCategoryForSubCategory}`,
+    });
+    setNewSubCategory("");
+  };
+
+  // Get SubCategories for selected Category
+  const getSubCategoriesForCategory = (category: string) => {
+    return subCategories.filter((sc: any) => sc.category === category);
+  };
+
+  // ==== MASTER MATERIALS STATE (created by Admin/Software Team with just name + code) ====
+  const [masterMaterials, setMasterMaterials] = useState<any[]>([]);
+
+  // Load master materials from API
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/master-materials');
+        if (res.ok) {
+          const data = await res.json();
+          setMasterMaterials(data?.materials || []);
+        }
+      } catch (e) {
+        console.warn('load master materials failed', e);
+        setMasterMaterials([]);
+      }
+    })();
+  }, []);
+  
+  // Local managed copies so admin can edit/delete/disable items in UI
+  const [localMaterials, setLocalMaterials] = useState(() => [] as Array<any>);
+  const [localShops, setLocalShops] = useState(() => [] as Array<any>);
+
+  // Search inputs for dashboard lists
+  const [shopSearch, setShopSearch] = useState<string>("");
+  const [materialSearch, setMaterialSearch] = useState<string>("");
+
+  const filteredShops = localShops.filter((s: any) => {
+    if (!shopSearch) return true;
+    const q = shopSearch.toLowerCase();
+    return (
+      (s.name || "").toLowerCase().includes(q) ||
+      (s.location || "").toLowerCase().includes(q) ||
+      (s.city || "").toLowerCase().includes(q)
+    );
   });
 
-  const [shopRequests, setShopRequests] = useState(() => {
-    const saved = localStorage.getItem("shopApprovalRequests");
-    return saved ? JSON.parse(saved) : [];
+  const filteredMaterials = localMaterials.filter((m: any) => {
+    if (!materialSearch) return true;
+    const q = materialSearch.toLowerCase();
+    return (
+      (m.name || "").toLowerCase().includes(q) ||
+      (m.code || "").toLowerCase().includes(q)
+    );
   });
 
-  const [supportMsgs, setSupportMsgs] = useState(() => {
-    const saved = localStorage.getItem("supportMessages");
-    return saved ? JSON.parse(saved) : [];
+  const [materialRequests, setMaterialRequests] = useState<any[]>([]);
+  const [shopRequests, setShopRequests] = useState<any[]>([]);
+  const [supportMsgs, setSupportMsgs] = useState<any[]>([]);
+
+  // Fetch approval requests and support messages from API
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/materials-pending-approval');
+        if (res.ok) {
+          const data = await res.json();
+          setMaterialRequests(data?.materials || []);
+        }
+      } catch (e) {
+        console.warn('load material requests failed', e);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/shops-pending-approval');
+        if (res.ok) {
+          const data = await res.json();
+          setShopRequests(data?.shops || []);
+        }
+      } catch (e) {
+        console.warn('load shop requests failed', e);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    // initialize local copies from store
+    setLocalMaterials(materials || []);
+  }, [materials]);
+
+  useEffect(() => {
+    setLocalShops(shops || []);
+  }, [shops]);
+
+  // ===== ADMIN/SOFTWARE TEAM: Master Material (Name + Code only) =====
+  const [newMasterMaterial, setNewMasterMaterial] = useState<{
+    name: string;
+    code: string;
+  }>({
+    name: "",
+    code: "",
   });
 
-  // Persist to localStorage
+  // Auto-generate code when admin enters material name
   useEffect(() => {
-    localStorage.setItem("materialApprovalRequests", JSON.stringify(materialRequests));
-  }, [materialRequests]);
+    if (newMasterMaterial.name) {
+      const code =
+        newMasterMaterial.name.substring(0, 3).toUpperCase() +
+        "-" +
+        Math.floor(1000 + Math.random() * 9000);
+      setNewMasterMaterial((prev) => ({ ...prev, code }));
+    }
+  }, [newMasterMaterial.name]);
 
-  useEffect(() => {
-    localStorage.setItem("shopApprovalRequests", JSON.stringify(shopRequests));
-  }, [shopRequests]);
+  const handleAddMasterMaterial = () => {
+    if (!newMasterMaterial.name) {
+      toast({
+        title: "Error",
+        description: "Material Name is required",
+        variant: "destructive",
+      });
+      return;
+    }
 
-  useEffect(() => {
-    localStorage.setItem("supportMessages", JSON.stringify(supportMsgs));
-  }, [supportMsgs]);
+    const newMaster = {
+      id: Math.random().toString(),
+      name: newMasterMaterial.name,
+      code: newMasterMaterial.code,
+      createdAt: new Date().toISOString(),
+      createdBy: user?.name,
+    };
 
-  // State for new material
+    setMasterMaterials((prev: any[]) => [...prev, newMaster]);
+
+    toast({
+      title: "Success",
+      description: "Master material created. Suppliers can now use this.",
+    });
+
+    setNewMasterMaterial({
+      name: "",
+      code: "",
+    });
+  };
+
+  // ===== SUPPLIER: Detailed Material (Select from Master + Fill Details) =====
+  const [selectedMasterId, setSelectedMasterId] = useState<string>("");
+  
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
     name: "",
     code: "",
@@ -140,39 +348,23 @@ export default function AdminDashboard() {
     metalType: "",
   });
 
-  // State for new shop
-  const [newShop, setNewShop] = useState<Partial<Shop>>({
-    name: "",
-    location: "",
-    city: "",
-    state: "",
-    country: "",
-    pincode: "",
-    phoneCountryCode: "+91",
-    //contactNumber: "",
-    gstNo: "",
-    rating: 5,
-  });
-
-  // State for support message
-  const [supportMsg, setSupportMsg] = useState("");
-
-  // Auto-generate code when name changes
-  useEffect(() => {
-    if (newMaterial.name) {
-      const code =
-        newMaterial.name.substring(0, 3).toUpperCase() +
-        "-" +
-        Math.floor(1000 + Math.random() * 9000);
-      setNewMaterial((prev) => ({ ...prev, code }));
+  const handleSelectMasterMaterial = (masterId: string) => {
+    const selected = masterMaterials.find((m: any) => m.id === masterId);
+    if (selected) {
+      setSelectedMasterId(masterId);
+      setNewMaterial({
+        ...newMaterial,
+        name: selected.name,
+        code: selected.code,
+      });
     }
-  }, [newMaterial.name]);
+  };
 
   const handleAddMaterial = () => {
     if (!newMaterial.name || !newMaterial.rate) {
       toast({
         title: "Error",
-        description: "Name and Rate are required",
+        description: "Name, Rate, and Unit are required",
         variant: "destructive",
       });
       return;
@@ -186,7 +378,7 @@ export default function AdminDashboard() {
       shopId = newMaterial.shopId;
     }
 
-    // Mock validation (keep this as is)
+    // Mock validation
     if (
       newMaterial.name.toLowerCase().includes("toy") ||
       newMaterial.name.toLowerCase().includes("game")
@@ -199,18 +391,15 @@ export default function AdminDashboard() {
       return;
     }
 
-    // 🔴 CHANGE IS HERE 👇
     const newRequest = {
-  id: Math.random().toString(),
-  material: { ...newMaterial },
-  submittedBy: user?.name,
-  submittedAt: new Date().toISOString(),
-  status: "pending",
-};
+      id: Math.random().toString(),
+      material: { ...newMaterial, shopId },
+      submittedBy: user?.name,
+      submittedAt: new Date().toISOString(),
+      status: "pending",
+    };
 
-setMaterialRequests(prev => [...prev, newRequest]);
-
-    // 🔴 DO NOT use addMaterial()
+    setMaterialRequests((prev: any[]) => [...prev, newRequest]);
 
     toast({
       title: "Success",
@@ -218,6 +407,7 @@ setMaterialRequests(prev => [...prev, newRequest]);
         "Material submitted for approval. Software team will review and approve/reject.",
     });
 
+    // Reset form
     setNewMaterial({
       name: "",
       code: "",
@@ -232,13 +422,29 @@ setMaterialRequests(prev => [...prev, newRequest]);
       finish: "",
       metalType: "",
     });
+    setSelectedMasterId("");
   };
+
+  // State for new shop
+  const [newShop, setNewShop] = useState<Partial<Shop>>({
+    name: "",
+    location: "",
+    city: "",
+    state: "",
+    country: "",
+    pincode: "",
+    phoneCountryCode: "+91",
+    gstNo: "",
+    rating: 5,
+  });
+
+  // State for support message
+  const [supportMsg, setSupportMsg] = useState("");
 
   const handleAddShop = () => {
     if (
       !newShop.name ||
       !newShop.phoneCountryCode ||
-      //!newShop.contactNumber ||
       !newShop.city ||
       !newShop.state ||
       !newShop.country ||
@@ -251,22 +457,21 @@ setMaterialRequests(prev => [...prev, newRequest]);
       });
       return;
     }
-    // This part should be **outside the if-block**
-const newRequest = {
-  id: Math.random().toString(),
-  shop: { ...newShop },
-  submittedBy: user?.name,
-  submittedAt: new Date().toISOString(),
-  status: "pending",
-};
 
-setShopRequests(prev => [...prev, newRequest]);
+    const newRequest = {
+      id: Math.random().toString(),
+      shop: { ...newShop },
+      submittedBy: user?.name,
+      submittedAt: new Date().toISOString(),
+      status: "pending",
+    };
+
+    setShopRequests((prev: any[]) => [...prev, newRequest]);
     setNewShop({
       name: "",
       location: "",
       city: "",
       phoneCountryCode: "+91",
-      //contactNumber: "",
       state: "",
       country: "",
       pincode: "",
@@ -280,11 +485,15 @@ setShopRequests(prev => [...prev, newRequest]);
   };
 
   const handleApproveShop = (requestId: string) => {
-    approveShop(requestId);
-    toast({
-      title: "Approved",
-      description: "Shop has been approved and added to the system",
-    });
+    (async () => {
+      try {
+        await approveShop?.(requestId);
+        setShopRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
+        toast({ title: "Approved", description: "Shop has been approved and added to the system" });
+      } catch (e) {
+        toast({ title: "Error", description: "Failed to approve shop", variant: "destructive" });
+      }
+    })();
   };
 
   const handleRejectShop = (requestId: string) => {
@@ -296,10 +505,17 @@ setShopRequests(prev => [...prev, newRequest]);
       });
       return;
     }
-    rejectShop(requestId, rejectReason);
-    setRejectingId(null);
-    setRejectReason("");
-    toast({ title: "Rejected", description: "Shop has been rejected" });
+    (async () => {
+      try {
+        await rejectShop?.(requestId, rejectReason);
+        setShopRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
+        setRejectingId(null);
+        setRejectReason("");
+        toast({ title: "Rejected", description: "Shop has been rejected" });
+      } catch (e) {
+        toast({ title: "Error", description: "Failed to reject shop", variant: "destructive" });
+      }
+    })();
   };
 
   const handleSupportSubmit = () => {
@@ -320,26 +536,91 @@ setShopRequests(prev => [...prev, newRequest]);
     user?.role === "software_team" ||
     user?.role === "supplier" ||
     user?.role === "purchase_team";
+  
   const canAddMaterials =
     user?.role === "admin" ||
     user?.role === "supplier" ||
     user?.role === "purchase_team";
+  
   const canAccessSupport = user?.role === "supplier" || user?.role === "user";
+
+  const isAdminOrSoftwareTeam =
+    user?.role === "admin" || user?.role === "software_team";
+
+  // Controlled tab state based on URL ?tab= and location changes
+  const [, loc] = useLocation();
+
+  const computeTab = () => {
+    if (typeof window !== "undefined") {
+      const t = new URLSearchParams(window.location.search).get("tab");
+      if (t) return t;
+    }
+    // default to dashboard view
+    return "dashboard";
+  };
+
+  const [activeTab, setActiveTab] = useState<string>(computeTab());
+
+  // update activeTab when location changes (sidebar link navigation)
+  useEffect(() => {
+    setActiveTab(computeTab());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc]);
+
+  // Also listen to history changes (pushState/replaceState/popstate) so query updates update the tab
+  useEffect(() => {
+    const update = () => setActiveTab(computeTab());
+
+    // popstate covers browser navigation
+    window.addEventListener("popstate", update);
+
+    // monkey-patch pushState/replaceState to emit popstate so client-side navigations (wouter) are caught
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (history as any).pushState = function (...args: any[]) {
+      const res = origPush.apply(this, args);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      return res;
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (history as any).replaceState = function (...args: any[]) {
+      const res = origReplace.apply(this, args);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      return res;
+    };
+
+    // run once to sync
+    update();
+
+    return () => {
+      window.removeEventListener("popstate", update);
+      (history as any).pushState = origPush;
+      (history as any).replaceState = origReplace;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Layout>
       <div className="space-y-6">
         <div>
           <h2 className="text-3xl font-bold tracking-tight font-heading">
-            {user?.role === "supplier" ? "Supplier Portal" : "Admin Dashboard"}
+            {user?.role === "supplier"
+              ? "Supplier Portal"
+              : "Admin Dashboard"}
           </h2>
           <p className="text-muted-foreground">
             Manage your inventory and settings
           </p>
         </div>
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Stats Overview (shown only on Dashboard tab) */}
+        {activeTab === "dashboard" && (
+          <div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -374,302 +655,604 @@ setShopRequests(prev => [...prev, newRequest]);
           </Card>
         </div>
 
+          {isAdminOrSoftwareTeam && (
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>All Shops</CardTitle>
+                  <CardDescription className="text-sm">List of shops (compact)</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="mb-2">
+                    <Input
+                      value={shopSearch}
+                      onChange={(e) => setShopSearch(e.target.value)}
+                      placeholder="Search shops..."
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {filteredShops.length === 0 ? (
+                      <p className="text-muted-foreground">No shops available</p>
+                    ) : (
+                      filteredShops.map((shop: any) => (
+                        <div key={shop.id} className="flex items-center justify-between p-2 border-b">
+                          <div>
+                            <div className="font-medium text-sm">{shop.name}</div>
+                            <div className="text-xs text-muted-foreground">{shop.location}, {shop.city}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" onClick={() => setLocalShops((prev: any[]) => prev.map((s: any) => s.id === shop.id ? { ...s, disabled: !s.disabled } : s))}>
+                              {shop.disabled ? 'Enable' : 'Disable'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() => {
+                                // permanent delete via API
+                                deleteShop(shop.id).then(() => {
+                                  setLocalShops((prev: any[]) => prev.filter((p: any) => p.id !== shop.id));
+                                  toast({ title: 'Deleted', description: `${shop.name} removed` });
+                                }).catch(() => {
+                                  setLocalShops((prev: any[]) => prev.filter((p: any) => p.id !== shop.id));
+                                  toast({ title: 'Deleted', description: `${shop.name} removed` });
+                                });
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>All Materials</CardTitle>
+                  <CardDescription className="text-sm">List of materials (compact)</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="mb-2">
+                    <Input
+                      value={materialSearch}
+                      onChange={(e) => setMaterialSearch(e.target.value)}
+                      placeholder="Search materials..."
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {filteredMaterials.length === 0 ? (
+                      <p className="text-muted-foreground">No materials available</p>
+                    ) : (
+                      filteredMaterials.map((mat: any) => (
+                        <div key={mat.id} className="flex items-center justify-between p-2 border-b">
+                          <div>
+                            <div className="font-medium text-sm">{mat.name}</div>
+                            <div className="text-xs text-muted-foreground">{mat.code} • ₹{mat.rate}/{mat.unit}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" onClick={() => setLocalMaterials((prev: any[]) => prev.map((m: any) => m.id === mat.id ? { ...m, disabled: !m.disabled } : m))}>
+                              {mat.disabled ? 'Enable' : 'Disable'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() => {
+                                deleteMaterial(mat.id).then(() => {
+                                  setLocalMaterials((prev: any[]) => prev.filter((p: any) => p.id !== mat.id));
+                                  toast({ title: 'Deleted', description: `${mat.name} removed` });
+                                }).catch(() => {
+                                  setLocalMaterials((prev: any[]) => prev.filter((p: any) => p.id !== mat.id));
+                                  toast({ title: 'Deleted', description: `${mat.name} removed` });
+                                });
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {user?.role === 'supplier' && (
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Available  Materials</CardTitle>
+                  <CardDescription className="text-sm">Select a material </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {masterMaterials.length === 0 ? (
+                    <p className="text-muted-foreground">No master materials yet</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {masterMaterials.map((mm: any) => (
+                        <div key={mm.id} className="p-2 border-b flex items-center justify-between">
+                          <div className="text-sm">{mm.name} <span className="text-xs text-muted-foreground ml-2">{mm.code}</span></div>
+                          <Link href={`/admin/dashboard?tab=materials`}>
+                            <a className="text-sm text-sidebar-primary">Use</a>
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Add Shop</CardTitle>
+                  <CardDescription className="text-sm">Suppliers can add their shop</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Link href="/admin/dashboard?tab=shops"><a className="text-sm text-sidebar-primary">Open Add Shop</a></Link>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+          </div>
+        )}
+
         <Tabs
-          defaultValue={
-            canAddMaterials
-              ? "materials"
-              : canManageShops
-                ? "shops"
-                : canAccessSupport
-                  ? "support"
-                  : "materials"
-          }
+          value={activeTab}
+          onValueChange={(val) => {
+            setActiveTab(val);
+            if (typeof window !== "undefined") {
+              const url = new URL(window.location.href);
+              url.searchParams.set("tab", val);
+              window.history.replaceState({}, "", url.toString());
+            }
+          }}
           className="w-full"
         >
-     <TabsList
-  className={cn(
-    "w-full flex gap-2 flex-nowrap overflow-x-auto whitespace-nowrap",
-    "bg-white rounded-xl p-1",
-    "border border-gray-200",
-    "shadow-sm"
-  )}
->
-  {canAddMaterials && (
-    <TabsTrigger value="materials">📦 Manage Materials</TabsTrigger>
-  )}
 
-  {canManageShops && (
-    <TabsTrigger value="shops">🏟️ Manage Shops</TabsTrigger>
-  )}
+          {/* === CATEGORIES TAB (Admin/Software Team Only) === */}
+          {isAdminOrSoftwareTeam && (
+            <TabsContent value="categories" className="space-y-4 mt-4">
+              <Card className="border-purple-200 bg-purple-50">
+                <CardHeader>
+                  <CardTitle className="text-purple-900">
+                    ➕ Add New Category
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <Input
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      placeholder="e.g. Flooring, Roofing"
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={handleAddCategory}
+                      className="bg-purple-600 hover:bg-purple-700"
+                    >
+                      <Plus className="h-4 w-4 mr-2" /> Add
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
 
-  {(user?.role === "admin" || user?.role === "software_team") && (
-    <TabsTrigger value="approvals">
-      Shop Approvals ({shopRequests.filter((r) => r.status === "pending").length})
-    </TabsTrigger>
-  )}
+              {/* Categories List */}
+              {categories.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Categories ({categories.length})</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {editingCategory && (
+                      <div className="p-3 mb-3 bg-white rounded border">
+                        <div className="flex gap-2">
+                          <Input value={editingCategoryValue} onChange={(e) => setEditingCategoryValue(e.target.value)} />
+                          <Button onClick={() => {
+                            // save edit
+                            const old = editingCategory;
+                            const updated = editingCategoryValue.trim();
+                            if (!updated) return;
+                            setCategories((prev: string[]) => prev.map((c: string) => c === old ? updated : c));
+                            setSubCategories((prev: any[]) => prev.map((s: any) => s.category === old ? { ...s, category: updated } : s));
+                            setEditingCategory(null);
+                            setEditingCategoryValue("");
+                            toast({ title: 'Updated', description: `Category updated to ${updated}` });
+                          }}>Save</Button>
+                          <Button variant="ghost" onClick={() => { setEditingCategory(null); setEditingCategoryValue(""); }}>Cancel</Button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {categories.map((cat: string, idx: number) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between p-3 bg-purple-100 rounded border border-purple-300"
+                        >
+                          <div>
+                            <span className="font-semibold">{cat}</span>
+                            {disabledCategories.includes(cat) && (
+                              <span className="text-xs text-muted-foreground ml-2">(disabled)</span>
+                            )}
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {subCategories.filter((sc: any) => sc.category === cat).length} subs
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" onClick={() => {
+                              setEditingCategory(cat);
+                              setEditingCategoryValue(cat);
+                            }}>Edit</Button>
 
-  {(user?.role === "admin" || user?.role === "software_team") && (
-    <TabsTrigger value="material-approvals">
-  Material Approvals ({materialRequests.filter((r) => r.status === "pending").length})
-</TabsTrigger>
+                            <Button size="sm" onClick={() => {
+                              setDisabledCategories((prev: string[]) => prev.includes(cat) ? prev.filter((c: string) => c !== cat) : [...prev, cat]);
+                            }}>{disabledCategories.includes(cat) ? 'Enable' : 'Disable'}</Button>
 
-  )}
+                            <Button size="sm" variant="ghost" className="text-destructive" onClick={() => {
+                              setCategories((prev: string[]) => prev.filter((c: string) => c !== cat));
+                              setSubCategories((prev: any[]) => prev.filter((s: any) => s.category !== cat));
+                            }}>Delete</Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-  {canViewSupportMessages && (
-    <TabsTrigger value="messages">
-      💬 Messages ({supportMessages.filter((m) => !m.isRead).length})
-    </TabsTrigger>
-  )}
+              {/* Add SubCategory */}
+              <Card className="border-green-200 bg-green-50">
+                <CardHeader>
+                  <CardTitle className="text-green-900">
+                    ➕ Add Sub-Category
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Select Category <span className="text-red-500">*</span></Label>
+                    <Select
+                      value={selectedCategoryForSubCategory}
+                      onValueChange={setSelectedCategoryForSubCategory}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a category..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories.map((cat: string) => (
+                          <SelectItem key={cat} value={cat}>
+                            {cat}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-  {canAccessSupport && <TabsTrigger value="support">Technical Support</TabsTrigger>}
-</TabsList>
+                  <div className="space-y-2">
+                    <Label>Sub-Category Name <span className="text-red-500">*</span></Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={newSubCategory}
+                        onChange={(e) => setNewSubCategory(e.target.value)}
+                        placeholder="e.g. Commercial, Residential"
+                        className="flex-1"
+                      />
+                      <Button
+                        onClick={handleAddSubCategory}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        <Plus className="h-4 w-4 mr-2" /> Add
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
+              {/* Shops list moved to Shops tab */}
+            
+            </TabsContent>
+          )}
 
           {/* === MATERIALS TAB === */}
           <TabsContent value="materials" className="space-y-4 mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Add New Material</CardTitle>
-                <CardDescription>
-                  Enter details to list a new item in the master database.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Basic Info */}
-                  <div className="space-y-2">
-                    <Label>
-                      Material Name <span className="text-red-500">*</span>
-                    </Label>
-
-                    <Input
-                      value={newMaterial.name}
-                      onChange={(e) =>
-                        setNewMaterial({ ...newMaterial, name: e.target.value })
-                      }
-                      placeholder="e.g. 18mm Plywood"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Item Code (Auto)</Label>
-                    <Input
-                      value={newMaterial.code}
-                      disabled
-                      className="bg-muted"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Rate (₹) <span className="text-red-500">*</span></Label>
-                    <Input
-                      type="number"
-                      value={newMaterial.rate}
-                      onChange={(e) =>
-                        setNewMaterial({
-                          ...newMaterial,
-                          rate: parseFloat(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
-
-                  {/* Classification */}
-                  <div className="space-y-2">
-                    <Label>Category <span className="text-red-500">*</span> </Label>
-                    <Select
-                      onValueChange={(v) =>
-                        setNewMaterial({ ...newMaterial, category: v })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CATEGORY_OPTIONS.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Sub Category <span className="text-red-500">*</span> </Label>
-                    <Input
-                      value={newMaterial.subCategory}
-                      onChange={(e) =>
-                        setNewMaterial({
-                          ...newMaterial,
-                          subCategory: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. Commercial"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Unit <span className="text-red-500">*</span> 
-                    </Label>
-                    <Select
-                      onValueChange={(v) =>
-                        setNewMaterial({ ...newMaterial, unit: v })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {UNIT_OPTIONS.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Purchase Team Only: Select Shop */}
-                  {user?.role === "purchase_team" && (
+            {/* ADMIN/SOFTWARE: Create Master Material */}
+            {isAdminOrSoftwareTeam && (
+              <Card className="border-blue-200 bg-blue-50">
+                <CardHeader>
+                  <CardTitle className="text-blue-900">
+                    📋 Create  Material
+                  </CardTitle>
+                  <CardDescription className="text-blue-800">
+                     Add new material templates for suppliers to use
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label className="text-blue-600 font-bold">
-                        Select Shop (Purchase Team)
+                      <Label>
+                        Material Name <span className="text-red-500">*</span>
                       </Label>
-                      <Select
-                        onValueChange={(v) =>
-                          setNewMaterial({ ...newMaterial, shopId: v })
+                      <Input
+                        value={newMasterMaterial.name}
+                        onChange={(e) =>
+                          setNewMasterMaterial({
+                            ...newMasterMaterial,
+                            name: e.target.value,
+                          })
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Supplier" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {shops.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Item Code (Auto)</Label>
+                      <Input
+                        value={newMasterMaterial.code}
+                        disabled
+                        className="bg-muted"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={handleAddMasterMaterial}
+                    className="w-full md:w-auto bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Plus className="mr-2 h-4 w-4" /> Create Material
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* SUPPLIER: Add Detailed Material from Master */}
+            {!isAdminOrSoftwareTeam && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Add Material to Inventory</CardTitle>
+                  <CardDescription>
+                    Select a master material and fill in additional details
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {masterMaterials.length === 0 ? (
+                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded text-yellow-800">
+                      ⚠️ No master materials available yet. Admin/Software Team will add them soon.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Master Material Selection */}
+                      <div className="space-y-2">
+                        <Label>Select Master Material <span className="text-red-500">*</span></Label>
+                        <Select
+                          value={newMaterial.masterMaterialId || ""}
+                          onValueChange={(v) => {
+                            const mm = masterMaterials.find((m: any) => m.id === v);
+                            if (mm) {
+                              setNewMaterial({
+                                ...newMaterial,
+                                masterMaterialId: v,
+                                name: mm.name,
+                                code: mm.code,
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Choose a master material..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {masterMaterials.map((mm: any) => (
+                              <SelectItem key={mm.id} value={mm.id}>
+                                {mm.name} ({mm.code})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {newMaterial.masterMaterialId && (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>Rate <span className="text-red-500">*</span></Label>
+                              <Input
+                                type="number"
+                                value={newMaterial.rate || ""}
+                                onChange={(e) =>
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    rate: parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Unit  <span className="text-red-500">*</span></Label>
+                              <Select
+                                value={newMaterial.unit || ""}
+                                onValueChange={(v) =>
+                                  setNewMaterial({ ...newMaterial, unit: v })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {UNIT_OPTIONS.map((c) => (
+                                    <SelectItem key={c} value={c}>
+                                      {c}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Category  <span className="text-red-500">*</span></Label>
+                              <Select
+                                value={newMaterial.category || ""}
+                                onValueChange={(v) =>
+                                  setNewMaterial({ ...newMaterial, category: v, subCategory: "" })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {categories.map((c: string) => (
+                                    <SelectItem key={c} value={c}>
+                                      {c}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Sub Category  <span className="text-red-500">*</span></Label>
+                              <Select
+                                value={newMaterial.subCategory || ""}
+                                onValueChange={(v) =>
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    subCategory: v,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {getSubCategoriesForCategory(newMaterial.category || "").map((sc: any) => (
+                                    <SelectItem key={sc.id} value={sc.name}>
+                                      {sc.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Brand Name  <span className="text-red-500">*</span></Label>
+                              <Input
+                                value={newMaterial.brandName || ""}
+                                onChange={(e) =>
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    brandName: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Model Number</Label>
+                              <Input
+                                value={newMaterial.modelNumber || ""}
+                                onChange={(e) =>
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    modelNumber: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Dimensions</Label>
+                              <Input
+                                value={newMaterial.dimensions || ""}
+                                onChange={(e) =>
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    dimensions: e.target.value,
+                                  })
+                                }
+                                placeholder="L x W x H"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Finish</Label>
+                              <Input
+                                value={newMaterial.finish || ""}
+                                onChange={(e) =>
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    finish: e.target.value,
+                                  })
+                                }
+                                placeholder="e.g. Matte, Glossy"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Grade Type</Label>
+                              <Input
+                                value={newMaterial.metalType || ""}
+                                onChange={(e) =>
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    metalType: e.target.value,
+                                  })
+                                }
+                                placeholder="e.g. SS 304, Aluminum"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Technical Specification</Label>
+                            <Textarea
+                              value={newMaterial.technicalSpecification || ""}
+                              onChange={(e) =>
+                                setNewMaterial({
+                                  ...newMaterial,
+                                  technicalSpecification: e.target.value,
+                                })
+                              }
+                              placeholder="Enter technical details..."
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Product Image</Label>
+                            <Input type="file" className="cursor-pointer" />
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                setActiveTab("dashboard");
+                                if (typeof window !== "undefined") {
+                                  const url = new URL(window.location.href);
+                                  url.searchParams.set("tab", "dashboard");
+                                  window.history.replaceState({}, "", url.toString());
+                                }
+                              }}
+                              className="w-full md:w-auto"
+                            >
+                              Back
+                            </Button>
+
+                            <Button
+                              onClick={handleAddMaterial}
+                              className="w-full md:w-auto"
+                            >
+                              <Plus className="mr-2 h-4 w-4" /> Add Material
+                            </Button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            )}
 
-                  {/* Technical Specs */}
-                  <div className="space-y-2">
-                    <Label>Brand Name <span className="text-red-500">*</span> </Label>
-                    <Input
-                      value={newMaterial.brandName}
-                      onChange={(e) =>
-                        setNewMaterial({
-                          ...newMaterial,
-                          brandName: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Model Number <span className="text-red-500">*</span> </Label>
-                    <Input
-                      value={newMaterial.modelNumber}
-                      onChange={(e) =>
-                        setNewMaterial({
-                          ...newMaterial,
-                          modelNumber: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Dimensions</Label>
-                    <Input
-                      value={newMaterial.dimensions}
-                      onChange={(e) =>
-                        setNewMaterial({
-                          ...newMaterial,
-                          dimensions: e.target.value,
-                        })
-                      }
-                      placeholder="L x W x H"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Finish</Label>
-                    <Input
-                      value={newMaterial.finish}
-                      onChange={(e) =>
-                        setNewMaterial({
-                          ...newMaterial,
-                          finish: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. Matte, Glossy"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Metal Type</Label>
-                    <Input
-                      value={newMaterial.metalType}
-                      onChange={(e) =>
-                        setNewMaterial({
-                          ...newMaterial,
-                          metalType: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. SS 304, Aluminum"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Technical Specification</Label>
-                  <Textarea
-                    value={newMaterial.technicalSpecification}
-                    onChange={(e) =>
-                      setNewMaterial({
-                        ...newMaterial,
-                        technicalSpecification: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Product Image</Label>
-                  <Input type="file" className="cursor-pointer" />
-                </div>
-
-                <Button
-                  onClick={handleAddMaterial}
-                  className="w-full md:w-auto"
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Add Material
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Existing Materials List */}
-            <div className="grid gap-4 md:grid-cols-2">
-              {materials.map((mat) => (
-                <Card key={mat.id}>
-                  <CardContent className="flex flex-row items-center justify-between p-6">
-                    <div>
-                      <h3 className="text-lg font-bold flex items-center gap-2">
-                        <Package className="h-4 w-4" /> {mat.name}
-                      </h3>
-                      <div className="text-sm text-muted-foreground">
-                        Code: {mat.code} • ₹{mat.rate}/{mat.unit}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {mat.category} &gt; {mat.subCategory}
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            {/* Materials list moved to Dashboard */}
           </TabsContent>
 
           {/* === SHOPS TAB === */}
@@ -690,7 +1273,7 @@ setShopRequests(prev => [...prev, newRequest]);
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Location <span className="text-red-500">*</span> </Label>
+                    <Label>Location <span className="text-red-500">*</span></Label>
                     <Input
                       value={newShop.location}
                       onChange={(e) =>
@@ -699,7 +1282,7 @@ setShopRequests(prev => [...prev, newRequest]);
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>City <span className="text-red-500">*</span> </Label>
+                    <Label>City <span className="text-red-500">*</span></Label>
                     <Input
                       value={newShop.city}
                       onChange={(e) =>
@@ -708,46 +1291,40 @@ setShopRequests(prev => [...prev, newRequest]);
                     />
                   </div>
 
-               <div className="space-y-2">
-  <Label>
-    Phone Number <span className="text-red-500">*</span>
-  </Label>
+                  <div className="space-y-2">
+                    <Label>Phone Number <span className="text-red-500">*</span></Label>
+                    <div className="flex gap-2">
+                      <Select
+                        value={newShop.phoneCountryCode || "+91"}
+                        onValueChange={(value) =>
+                          setNewShop({ ...newShop, phoneCountryCode: value })
+                        }
+                      >
+                        <SelectTrigger className="w-28">
+                          <SelectValue placeholder="+91" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {COUNTRY_CODES.map((c) => (
+                            <SelectItem key={c.code} value={c.code}>
+                              {c.code}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
 
-  <div className="flex gap-2">
-    {/* Country Code Dropdown */}
-    <Select
-      value={newShop.phoneCountryCode}
-      onValueChange={(value) =>
-        setNewShop({ ...newShop, phoneCountryCode: value })
-      }
-    >
-      <SelectTrigger className="w-28">
-        <SelectValue placeholder="+91" />
-      </SelectTrigger>
-      <SelectContent>
-        {COUNTRY_CODES.map((c) => (
-          <SelectItem key={c.code} value={c.code}>
-            {c.country} ({c.code})
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-
-    {/* Phone Number Input */}
-    <Input
-      value={newShop.contactNumber}
-      onChange={(e) =>
-        setNewShop({
-          ...newShop,
-          contactNumber: e.target.value,
-        })
-      }
-      placeholder="Enter phone number"
-      type="tel"
-    />
-  </div>
-</div>
-
+                      <Input
+                        value={newShop.contactNumber || ""}
+                        onChange={(e) =>
+                          setNewShop({
+                            ...newShop,
+                            contactNumber: e.target.value,
+                          })
+                        }
+                        placeholder="Enter phone number"
+                        type="tel"
+                      />
+                    </div>
+                  </div>
 
                   <div className="space-y-2">
                     <Label>State <span className="text-red-500">*</span></Label>
@@ -793,268 +1370,284 @@ setShopRequests(prev => [...prev, newRequest]);
                 <Button onClick={handleAddShop}>Add Shop</Button>
               </CardContent>
             </Card>
-            <div className="grid gap-4 md:grid-cols-2">
-              {shops.map((shop) => (
-                <Card key={shop.id}>
-                  <CardContent className="flex flex-row items-center justify-between p-6">
-                    <div>
-                      <h3 className="text-lg font-bold flex items-center gap-2">
-                        <Building2 className="h-4 w-4" /> {shop.name}
-                      </h3>
-                      <div className="text-sm text-muted-foreground">
-                        {shop.location}, {shop.city}
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            {/* Shops list moved to Dashboard */}
           </TabsContent>
 
           {/* === APPROVALS TAB === */}
           {canManageShops && (
-  <TabsContent value="approvals" className="space-y-4 mt-4">
-    <Card>
-      <CardHeader>
-        <CardTitle>Shop Approval Requests</CardTitle>
-        <CardDescription>
-          Review and approve/reject new shop submissions
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {shopRequests.filter((r) => r.status === "pending").length === 0 ? (
-          <p className="text-muted-foreground">
-            No pending approval requests
-          </p>
-        ) : (
-          shopRequests
-            .filter((r) => r.status === "pending")
-            .map((request) => (
-              <Card key={request.id} className="border-border/50">
-                <CardContent className="pt-6 space-y-4">
-                  <div>
-                    <h3 className="text-lg font-bold">{request.shop.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Submitted by: {request.submittedBy} at{" "}
-                      {new Date(request.submittedAt).toLocaleString()}
+            <TabsContent value="approvals" className="space-y-4 mt-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Shop Approval Requests</CardTitle>
+                  <CardDescription>
+                    Review and approve/reject new shop submissions
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {shopRequests.filter((r: any) => r.status === "pending").length ===
+                  0 ? (
+                    <p className="text-muted-foreground">
+                      No pending approval requests
                     </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="font-medium">Location:</span>{" "}
-                      {request.shop.location}
-                    </div>
-                    <div>
-                      <span className="font-medium">City:</span>{" "}
-                      {request.shop.city}
-                    </div>
-                    <div>
-                      <span className="font-medium">State:</span>{" "}
-                      {request.shop.state}
-                    </div>
-                    <div>
-                      <span className="font-medium">Country:</span>{" "}
-                      {request.shop.country}
-                    </div>
-                    <div>
-                      <span className="font-medium">Phone:</span>{" "}
-                      {request.shop.phoneCountryCode}{" "}
-                      {request.shop.contactNumber}
-                    </div>
-                    <div>
-                      <span className="font-medium">Pincode:</span>{" "}
-                      {request.shop.pincode}
-                    </div>
-                    {request.shop.gstNo && (
-                      <div className="col-span-2">
-                        <span className="font-medium">GST:</span>{" "}
-                        {request.shop.gstNo}
-                      </div>
-                    )}
-                  </div>
+                  ) : (
+                    shopRequests
+                      .filter((r: any) => r.status === "pending")
+                      .map((request: any) => (
+                        <Card key={request.id} className="border-border/50">
+                          <CardContent className="pt-6 space-y-4">
+                            <div>
+                              <h3 className="text-lg font-bold">
+                                {request.shop.name}
+                              </h3>
+                              <p className="text-sm text-muted-foreground">
+                                Submitted by: {request.submittedBy} at{" "}
+                                {new Date(
+                                  request.submittedAt
+                                ).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <p className="font-semibold">Location</p>
+                                <p>{request.shop.location}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">City</p>
+                                <p>{request.shop.city}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">State</p>
+                                <p>{request.shop.state}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Country</p>
+                                <p>{request.shop.country}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Pincode</p>
+                                <p>{request.shop.pincode}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Phone</p>
+                                <p>
+                                  {request.shop.phoneCountryCode}
+                                  {request.shop.contactNumber}
+                                </p>
+                              </div>
+                              {request.shop.gstNo && (
+                                <div>
+                                  <p className="font-semibold">GST No</p>
+                                  <p>{request.shop.gstNo}</p>
+                                </div>
+                              )}
+                            </div>
 
-                  {/* Approve / Reject Buttons */}
-                  <div className="flex gap-2">
-                    {/* Approve */}
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        setShopRequests((prev) =>
-                          prev.map((r) =>
-                            r.id === request.id ? { ...r, status: "approved" } : r
-                          )
-                        )
-                      }
-                      className="gap-2"
-                    >
-                      <CheckCircle2 className="h-4 w-4" /> Approve
-                    </Button>
+                            {/* Approve / Reject Buttons */}
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  setShopRequests((prev: any[]) =>
+                                    prev.map((r: any) =>
+                                      r.id === request.id
+                                        ? { ...r, status: "approved" }
+                                        : r
+                                    )
+                                  )
+                                }
+                                className="gap-2"
+                              >
+                                <CheckCircle2 className="h-4 w-4" /> Approve
+                              </Button>
 
-                    {/* Reject */}
-                    {rejectingId === request.id ? (
-                      <div className="flex gap-2 flex-1">
-                        <Input
-                          placeholder="Rejection reason..."
-                          value={rejectReason}
-                          onChange={(e) => setRejectReason(e.target.value)}
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setShopRequests((prev) =>
-                              prev.map((r) =>
-                                r.id === request.id
-                                  ? { ...r, status: "rejected", rejectionReason: rejectReason }
-                                  : r
-                              )
-                            );
-                            setRejectingId(null);
-                            setRejectReason("");
-                          }}
-                          variant="destructive"
-                        >
-                          Confirm
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setRejectingId(request.id)}
-                        className="gap-2"
-                      >
-                        <XCircle className="h-4 w-4" /> Reject
-                      </Button>
-                    )}
-                  </div>
+                              {rejectingId === request.id ? (
+                                <div className="flex gap-2 flex-1">
+                                  <Input
+                                    placeholder="Reason..."
+                                    value={rejectReason}
+                                    onChange={(e) =>
+                                      setRejectReason(e.target.value)
+                                    }
+                                    className="text-sm"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    onClick={() =>
+                                      handleRejectShop(request.id)
+                                    }
+                                  >
+                                    Confirm
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setRejectingId(null)}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setRejectingId(request.id)}
+                                  className="gap-2"
+                                >
+                                  <XCircle className="h-4 w-4" /> Reject
+                                </Button>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))
+                  )}
                 </CardContent>
+
+                {/* Processed Requests */}
+                {shopRequests.filter((r: any) => r.status !== "pending").length >
+                  0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">
+                        Processed Requests
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {shopRequests
+                        .filter((r: any) => r.status !== "pending")
+                        .map((request: any) => (
+                          <div
+                            key={request.id}
+                            className="flex justify-between items-start p-3 bg-muted/50 rounded"
+                          >
+                            <div>
+                              <p className="font-semibold">
+                                {request.shop.name}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {request.submittedBy}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <Badge
+                                variant={
+                                  request.status === "approved"
+                                    ? "default"
+                                    : "destructive"
+                                }
+                              >
+                                {request.status.charAt(0).toUpperCase() +
+                                  request.status.slice(1)}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                    </CardContent>
+                  </Card>
+                )}
               </Card>
-            ))
-        )}
-      </CardContent>
-
-      {/* Processed Requests */}
-      {shopRequests.filter((r) => r.status !== "pending").length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Processed Requests</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {shopRequests
-              .filter((r) => r.status !== "pending")
-              .map((request) => (
-                <div
-                  key={request.id}
-                  className="flex justify-between items-start p-3 bg-muted/50 rounded"
-                >
-                  <div>
-                    <p className="font-medium">{request.shop.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {request.submittedBy}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <Badge
-                      variant={request.status === "approved" ? "default" : "destructive"}
-                    >
-                      {request.status.toUpperCase()}
-                    </Badge>
-                    {request.rejectionReason && (
-                      <p className="text-xs mt-1">Reason: {request.rejectionReason}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-          </CardContent>
-        </Card>
-      )}
-    </Card>
-  </TabsContent>
-)}
-
+            </TabsContent>
+          )}
 
           {/* === MATERIAL APPROVALS TAB === */}
-<TabsContent value="material-approvals" className="space-y-4 mt-4">
-  <Card>
-    <CardHeader>
-      <CardTitle>Material Approval Requests</CardTitle>
-      <CardDescription>
-        Review and approve/reject new material submissions
-      </CardDescription>
-    </CardHeader>
-    <CardContent className="space-y-4">
-      {materialRequests.filter(r => r.status === "pending").length === 0 ? (
-        <p className="text-muted-foreground">No pending material approvals</p>
-      ) : (
-        materialRequests
-          .filter(r => r.status === "pending")
-          .map((request) => (
-            <Card key={request.id} className="border-border/50">
-              <CardContent className="pt-6 space-y-4">
-                <div>
-                  <h3 className="text-lg font-bold">{request.material.name}</h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm mt-2">
-                    <div><b>Item Code:</b> {request.material.code}</div>
-                    <div><b>Rate:</b> ₹{request.material.rate}</div>
-                    <div><b>Category:</b> {request.material.category}</div>
-                    <div><b>Sub Category:</b> {request.material.subCategory}</div>
-                    <div><b>Unit:</b> {request.material.unit}</div>
-                    <div><b>Brand:</b> {request.material.brandName || "—"}</div>
-                    <div><b>Model:</b> {request.material.modelNumber || "—"}</div>
-                    <div><b>Finish:</b> {request.material.finish || "—"}</div>
-                    <div><b>Metal Type:</b> {request.material.metalType || "—"}</div>
-                    <div className="col-span-2"><b>Dimensions:</b> {request.material.dimensions || "—"}</div>
-                    <div className="col-span-2"><b>Technical Spec:</b> {request.material.technicalSpecification || "—"}</div>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Submitted by: {request.submittedBy} at {new Date(request.submittedAt).toLocaleString()}
+          <TabsContent value="material-approvals" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Material Approval Requests</CardTitle>
+                <CardDescription>
+                  Review and approve/reject new material submissions
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {materialRequests.filter((r: any) => r.status === "pending")
+                  .length === 0 ? (
+                  <p className="text-muted-foreground">
+                    No pending material approvals
                   </p>
-                </div>
+                ) : (
+                  materialRequests
+                    .filter((r: any) => r.status === "pending")
+                    .map((request: any) => (
+                      <Card key={request.id} className="border-border/50">
+                        <CardContent className="pt-6 space-y-4">
+                          <div>
+                            <h3 className="text-lg font-bold">
+                              {request.material.name}
+                            </h3>
+                            <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                              <div>
+                                <p className="font-semibold">Code</p>
+                                <p>{request.material.code}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Rate</p>
+                                <p>₹{request.material.rate}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Unit</p>
+                                <p>{request.material.unit}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Category</p>
+                                <p>{request.material.category}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Sub Category</p>
+                                <p>{request.material.subCategory}</p>
+                              </div>
+                              <div>
+                                <p className="font-semibold">Brand</p>
+                                <p>{request.material.brandName}</p>
+                              </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2">
+                              Submitted by: {request.submittedBy} at{" "}
+                              {new Date(
+                                request.submittedAt
+                              ).toLocaleDateString()}
+                            </p>
+                          </div>
 
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      setMaterialRequests(prev =>
-                        prev.map(r =>
-                          r.id === request.id ? { ...r, status: "approved" } : r
-                        )
-                      )
-                    }
-                    className="gap-2"
-                  >
-                    <CheckCircle2 className="h-4 w-4" /> Approve
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      setMaterialRequests(prev =>
-                        prev.map(r =>
-                          r.id === request.id ? { ...r, status: "rejected" } : r
-                        )
-                      )
-                    }
-                    className="gap-2"
-                  >
-                    <XCircle className="h-4 w-4" /> Reject
-                  </Button>
-                </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                setMaterialRequests((prev: any[]) =>
+                                  prev.map((r: any) =>
+                                    r.id === request.id
+                                      ? { ...r, status: "approved" }
+                                      : r
+                                  )
+                                )
+                              }
+                              className="gap-2"
+                            >
+                              <CheckCircle2 className="h-4 w-4" /> Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                setMaterialRequests((prev: any[]) =>
+                                  prev.map((r: any) =>
+                                    r.id === request.id
+                                      ? { ...r, status: "rejected" }
+                                      : r
+                                  )
+                                )
+                              }
+                              className="gap-2"
+                            >
+                              <XCircle className="h-4 w-4" /> Reject
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                )}
               </CardContent>
             </Card>
-          ))
-      )}
-    </CardContent>
-  </Card>
-</TabsContent>
-
+          </TabsContent>
 
           {/* === MESSAGES TAB (Admin/Software Team Only) === */}
           {canViewSupportMessages && (
@@ -1077,12 +1670,13 @@ setShopRequests(prev => [...prev, newRequest]);
                           <div className="flex justify-between items-start">
                             <div>
                               <p className="font-semibold">{msg.sentBy}</p>
-                              <p className="text-xs text-muted-foreground">
-                                Role: {msg.sentByRole} •{" "}
+                              <p className="text-sm text-muted-foreground">
                                 {new Date(msg.sentAt).toLocaleString()}
                               </p>
                             </div>
-                            {!msg.isRead && <Badge>New</Badge>}
+                            {!msg.isRead && (
+                              <Badge variant="default">New</Badge>
+                            )}
                           </div>
                           <p className="text-sm leading-relaxed bg-muted/50 p-3 rounded">
                             {msg.message}
@@ -1097,66 +1691,66 @@ setShopRequests(prev => [...prev, newRequest]);
           )}
 
           {/* === SUPPORT TAB === */}
-          {/* === SUPPORT TAB === */}
-<TabsContent value="support" className="space-y-4 mt-4">
-  <Card>
-    <CardHeader>
-      <CardTitle>Technical Support</CardTitle>
-      <CardDescription>
-        Request new categories or report issues to the software team.
-      </CardDescription>
-    </CardHeader>
-    <CardContent className="space-y-4">
-      {/* Input for new support message */}
-      <div className="space-y-2">
-        <Label>Message / Request</Label>
-        <Textarea
-          placeholder="I need a new category for 'Smart Home Devices'..."
-          className="min-h-[150px]"
-          value={supportMsg}
-          onChange={(e) => setSupportMsg(e.target.value)}
-          data-testid="textarea-support-message"
-        />
-      </div>
-
-      <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded text-sm text-blue-700 dark:text-blue-300">
-        ✓ This message will be sent to Admin & Software Team
-      </div>
-
-      <Button
-        onClick={handleSupportSubmit}
-        data-testid="button-send-support"
-      >
-        <MessageSquare className="mr-2 h-4 w-4" /> Send Request
-      </Button>
-
-      {/* Display list of messages */}
-      {supportMsgs.length === 0 ? (
-        <p className="text-muted-foreground">No messages yet</p>
-      ) : (
-        supportMsgs.map((msg) => (
-          <Card key={msg.id} className="border-border/50">
-            <CardContent className="pt-6 space-y-3">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="font-semibold">{msg.sentBy}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Role: {msg.sentByRole} • {new Date(msg.sentAt).toLocaleString()}
-                  </p>
+          <TabsContent value="support" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Technical Support</CardTitle>
+                <CardDescription>
+                  Request new categories or report issues to the software team.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Input for new support message */}
+                <div className="space-y-2">
+                  <Label>Message / Request</Label>
+                  <Textarea
+                    placeholder="I need a new category for 'Smart Home Devices'..."
+                    className="min-h-[150px]"
+                    value={supportMsg}
+                    onChange={(e) => setSupportMsg(e.target.value)}
+                    data-testid="textarea-support-message"
+                  />
                 </div>
-                {!msg.isRead && <Badge>New</Badge>}
-              </div>
-              <p className="text-sm leading-relaxed bg-muted/50 p-3 rounded">
-                {msg.message}
-              </p>
-            </CardContent>
-          </Card>
-        ))
-      )}
-    </CardContent>
-  </Card>
-</TabsContent>
 
+                <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded text-sm text-blue-700 dark:text-blue-300">
+                  ✓ This message will be sent to Admin & Software Team
+                </div>
+
+                <Button
+                  onClick={handleSupportSubmit}
+                  data-testid="button-send-support"
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" /> Send Request
+                </Button>
+
+                {/* Display list of messages */}
+                {supportMsgs.length === 0 ? (
+                  <p className="text-muted-foreground">No messages yet</p>
+                ) : (
+                  supportMsgs.map((msg: any) => (
+                    <Card key={msg.id} className="border-border/50">
+                      <CardContent className="pt-6 space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-semibold">You</p>
+                            <p className="text-sm text-muted-foreground">
+                              {new Date(msg.sentAt).toLocaleString()}
+                            </p>
+                          </div>
+                          {!msg.isRead && (
+                            <Badge variant="default">Unread</Badge>
+                          )}
+                        </div>
+                        <p className="text-sm leading-relaxed bg-muted/50 p-3 rounded">
+                          {msg.message}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </div>
     </Layout>

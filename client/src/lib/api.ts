@@ -1,7 +1,16 @@
+import { useAuth } from "./auth-context";
+
 const API_BASE = "/api";
 
+// This will be used with a hook to inject token dynamically
+let globalToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  globalToken = token;
+}
+
 export async function apiFetch(path: string, init?: RequestInit) {
-  const token = localStorage.getItem("authToken");
+  const token = globalToken;
   const headers = new Headers(init?.headers || {});
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -9,8 +18,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
   const res = await fetch(`${API_BASE}${path}`, { ...(init || {}), headers });
 
   if (res.status === 401) {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("authUser");
+    globalToken = null;
   }
 
   return res;

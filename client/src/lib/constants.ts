@@ -41,94 +41,9 @@ export interface Material {
 export interface Shop {
   id: string;
   name: string;
-  location: string;
-  rating: number;
-  costMultiplier: number; // 1.0 = standard, 1.2 = premium, 0.8 = budget
-  qualityTier: "budget" | "standard" | "premium";
+  location?: string;
+  rating?: number;
 }
-
-export const shops: Shop[] = [
-  {
-    id: "shop-1",
-    name: "BuildMart Standard",
-    location: "City Center",
-    rating: 4.2,
-    costMultiplier: 1.0,
-    qualityTier: "standard"
-  },
-  {
-    id: "shop-2",
-    name: "Premium Construction Hub",
-    location: "Business District",
-    rating: 4.7,
-    costMultiplier: 1.3,
-    qualityTier: "premium"
-  },
-  {
-    id: "shop-3",
-    name: "Budget Materials Co",
-    location: "Industrial Area",
-    rating: 3.8,
-    costMultiplier: 0.75,
-    qualityTier: "budget"
-  },
-  {
-    id: "shop-4",
-    name: "SupplierMax Wholesale",
-    location: "Port Road",
-    rating: 4.0,
-    costMultiplier: 0.85,
-    qualityTier: "budget"
-  },
-  {
-    id: "shop-5",
-    name: "Elite Builders Supply",
-    location: "Premium Zone",
-    rating: 4.8,
-    costMultiplier: 1.4,
-    qualityTier: "premium"
-  },
-  {
-    id: "shop-6",
-    name: "Apex Construction Materials",
-    location: "North Avenue",
-    rating: 4.4,
-    costMultiplier: 1.05,
-    qualityTier: "standard"
-  },
-  {
-    id: "shop-7",
-    name: "TechBuild Solutions",
-    location: "Tech Park",
-    rating: 4.6,
-    costMultiplier: 1.25,
-    qualityTier: "premium"
-  },
-  {
-    id: "shop-8",
-    name: "Value Materials Mart",
-    location: "Suburban Area",
-    rating: 3.9,
-    costMultiplier: 0.80,
-    qualityTier: "budget"
-  },
-  {
-    id: "shop-9",
-    name: "Metro Construction Depot",
-    location: "Downtown",
-    rating: 4.3,
-    costMultiplier: 1.02,
-    qualityTier: "standard"
-  },
-  {
-    id: "shop-10",
-    name: "Luxury Building Systems",
-    location: "Exclusive District",
-    rating: 4.9,
-    costMultiplier: 1.5,
-    qualityTier: "premium"
-  }
-];
 
 export const materialsByType: Record<string, Material[]> = {
   civil: [

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
+  Building2,
   BrickWall,
   DoorOpen,
   Cloud,
@@ -17,9 +18,13 @@ import {
   X,
   LogOut,
   Settings,
-  Package
+  Package,
+  MessageSquare,
+  CheckCircle2,
+  ShoppingCart
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useData } from "@/lib/store";
 
 const estimatorItems = [
@@ -39,7 +44,41 @@ const estimatorItems = [
 export function Sidebar() {
   const [location, setLocation] = useLocation();
   const [isOpen, setIsOpen] = useState(true);
+  const [estSearch, setEstSearch] = useState("");
   const { user, logout } = useData();
+
+  // Fetch pending counts from API
+  const [pendingShopCount, setPendingShopCount] = useState(0);
+  const [pendingMaterialCount, setPendingMaterialCount] = useState(0);
+  const [messageCount, setMessageCount] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/shops-pending-approval');
+        if (res.ok) {
+          const data = await res.json();
+          setPendingShopCount((data?.shops || []).filter((r: any) => r.status === 'pending').length);
+        }
+      } catch (e) {
+        console.warn('load shop count failed', e);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/materials-pending-approval');
+        if (res.ok) {
+          const data = await res.json();
+          setPendingMaterialCount((data?.materials || []).filter((r: any) => r.status === 'pending').length);
+        }
+      } catch (e) {
+        console.warn('load material count failed', e);
+      }
+    })();
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -49,6 +88,17 @@ export function Sidebar() {
   const isAdminOrSoftware = user?.role === 'admin' || user?.role === 'software_team';
   const isSupplierOrPurchase = user?.role === 'supplier' || user?.role === 'purchase_team';
   const isClient = user?.role === 'user';
+
+  const getAdminTab = () => {
+    if (typeof window === "undefined") return null;
+    return new URL(window.location.href).searchParams.get("tab");
+  };
+
+  const currentAdminTab = getAdminTab();
+
+  const filteredEstimators = estSearch
+    ? estimatorItems.filter((it) => it.label.toLowerCase().includes(estSearch.toLowerCase()))
+    : estimatorItems;
 
   return (
     <>
@@ -82,13 +132,69 @@ export function Sidebar() {
             </a>
           </Link>
 
-          {(isAdminOrSoftware || isSupplierOrPurchase) && (
-             <Link href="/admin/dashboard">
-                <a className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4", location === "/admin/dashboard" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}>
-                  <Settings className="h-4 w-4" />
-                  {isAdminOrSoftware ? "Admin Panel" : "Manage Materials"}
+          {isAdminOrSoftware && (
+            <>
+              <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Admin
+              </div>
+              <Link href="/admin/dashboard?tab=materials">
+                <a
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "materials" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Package className="h-4 w-4" /> Manage Materials
                 </a>
-             </Link>
+              </Link>
+              <Link href="/admin/dashboard?tab=shops">
+                <a
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "shops" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Building2 className="h-4 w-4" /> Manage Shops
+                </a>
+              </Link>
+              <Link href="/admin/dashboard?tab=categories">
+                <a
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "categories" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Layers className="h-4 w-4" /> Categories
+                </a>
+              </Link>
+              <Link href="/admin/dashboard?tab=approvals">
+                <a
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <ShieldAlert className="h-4 w-4" /> Shop Approvals
+                  {pendingShopCount > 0 && (
+                    <Badge variant="destructive" className="ml-auto">{pendingShopCount}</Badge>
+                  )}
+                </a>
+              </Link>
+              <Link href="/admin/dashboard?tab=material-approvals">
+                <a
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "material-approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <CheckCircle2 className="h-4 w-4" /> Material Approvals
+                  {pendingMaterialCount > 0 && (
+                    <Badge variant="destructive" className="ml-auto">{pendingMaterialCount}</Badge>
+                  )}
+                </a>
+              </Link>
+              <Link href="/admin/dashboard?tab=messages">
+                <a
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4", currentAdminTab === "messages" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <MessageSquare className="h-4 w-4" /> Messages
+                  {messageCount > 0 && (
+                    <Badge variant="secondary" className="ml-auto">{messageCount}</Badge>
+                  )}
+                </a>
+              </Link>
+            </>
           )}
 
           {/* Estimators Section */}
@@ -97,7 +203,15 @@ export function Sidebar() {
               <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Estimators
               </div>
-              {estimatorItems.map((item) => (
+              <div className="px-3 mb-2">
+                <input
+                  value={estSearch}
+                  onChange={(e) => setEstSearch(e.target.value)}
+                  placeholder="Search estimators..."
+                  className="w-full rounded-md border px-2 py-1 text-sm bg-transparent text-sidebar-foreground placeholder:text-muted-foreground"
+                />
+              </div>
+              {filteredEstimators.map((item) => (
                 <Link key={item.href} href={item.href}>
                   <a
                     className={cn(

@@ -1,8 +1,76 @@
 import pg from "pg";
+import fs from "fs";
+import path from "path";
+
+// Load .env file BEFORE creating the pool
+// client.ts is at server/db/client.ts, so go up 2 directories to reach the .env file at root
+const envPath = path.join(import.meta.dirname, "..", "..", ".env");
+
+console.log("[db-client] Loading .env from:", envPath);
+console.log("[db-client] .env exists:", fs.existsSync(envPath));
+
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, "utf-8");
+  console.log("[db-client] .env content length:", envContent.length);
+  
+  // Try multiple ways to extract the URL
+  let dbUrl = process.env.DATABASE_URL;
+  
+  // Method 1: quoted string
+  const match1 = envContent.match(/DATABASE_URL="([^"]+)"/);
+  if (match1 && match1[1]) {
+    dbUrl = match1[1];
+    console.log("[db-client] ✓ Extracted DATABASE_URL from quoted string");
+  }
+  
+  // Method 2: unquoted string
+  if (!dbUrl) {
+    const match2 = envContent.match(/DATABASE_URL=(.+)$/m);
+    if (match2 && match2[1]) {
+      dbUrl = match2[1].trim();
+      console.log("[db-client] ✓ Extracted DATABASE_URL from unquoted string");
+    }
+  }
+  
+  if (dbUrl) {
+    process.env.DATABASE_URL = dbUrl;
+    console.log("[db-client] ✓ Set DATABASE_URL to Supabase");
+    console.log("[db-client] URL preview:", dbUrl.substring(0, 50) + "...");
+  } else {
+    console.log("[db-client] ⚠ Could not extract DATABASE_URL from .env");
+  }
+}
 
 const connectionString = process.env.DATABASE_URL || "postgres://boq_admin:boq_admin_pass@localhost:5432/boq";
+console.log("[db-client] Connecting to:", connectionString.includes("supabase") ? "SUPABASE ✓" : "LOCAL ✗");
 
-export const pool = new pg.Pool({ connectionString });
+// For Supabase connections, we need to accept self-signed certificates
+const poolConfig: any = { 
+  connectionString
+};
+
+if (connectionString.includes("supabase")) {
+  // Use environment variable to disable cert validation
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  poolConfig.ssl = "require";
+}
+
+export const pool = new pg.Pool(poolConfig);
+
+// Handle pool errors
+pool.on('error', (err) => {
+  console.error("[db-pool] Unexpected error on idle client", err);
+});
+
+// Test the connection asynchronously (don't block startup)
+pool.connect()
+  .then((client) => {
+    console.log("[db-pool] ✓ Successfully connected to database");
+    client.release();
+  })
+  .catch((err: any) => {
+    console.error("[db-pool] ✗ Failed to connect to database:", err.message);
+  });
 
 export async function query<T = any>(text: string, params: any[] = []) {
   return pool.query<T>(text, params);

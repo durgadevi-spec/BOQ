@@ -21,7 +21,8 @@ import {
   Package,
   MessageSquare,
   CheckCircle2,
-  ShoppingCart
+  ShoppingCart,
+  AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -126,10 +127,10 @@ export function Sidebar() {
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
           {/* Dashboard Link - varies by role */}
           <Link href="/dashboard">
-            <a className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4", location === "/dashboard" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}>
+            <div className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer", location === "/dashboard" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}>
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
-            </a>
+            </div>
           </Link>
 
           {isAdminOrSoftware && (
@@ -138,61 +139,85 @@ export function Sidebar() {
                 Admin
               </div>
               <Link href="/admin/dashboard?tab=materials">
-                <a
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "materials" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "materials" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
                   onClick={() => setIsOpen(false)}
                 >
                   <Package className="h-4 w-4" /> Manage Materials
-                </a>
+                </div>
               </Link>
               <Link href="/admin/dashboard?tab=shops">
-                <a
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "shops" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "shops" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
                   onClick={() => setIsOpen(false)}
                 >
                   <Building2 className="h-4 w-4" /> Manage Shops
-                </a>
+                </div>
               </Link>
               <Link href="/admin/dashboard?tab=categories">
-                <a
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "categories" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "categories" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
                   onClick={() => setIsOpen(false)}
                 >
                   <Layers className="h-4 w-4" /> Categories
-                </a>
+                </div>
               </Link>
               <Link href="/admin/dashboard?tab=approvals">
-                <a
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
                   onClick={() => setIsOpen(false)}
                 >
                   <ShieldAlert className="h-4 w-4" /> Shop Approvals
                   {pendingShopCount > 0 && (
                     <Badge variant="destructive" className="ml-auto">{pendingShopCount}</Badge>
                   )}
-                </a>
+                </div>
               </Link>
               <Link href="/admin/dashboard?tab=material-approvals">
-                <a
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors", currentAdminTab === "material-approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "material-approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
                   onClick={() => setIsOpen(false)}
                 >
                   <CheckCircle2 className="h-4 w-4" /> Material Approvals
                   {pendingMaterialCount > 0 && (
                     <Badge variant="destructive" className="ml-auto">{pendingMaterialCount}</Badge>
                   )}
-                </a>
+                </div>
               </Link>
               <Link href="/admin/dashboard?tab=messages">
-                <a
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4", currentAdminTab === "messages" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer", currentAdminTab === "messages" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
                   onClick={() => setIsOpen(false)}
                 >
                   <MessageSquare className="h-4 w-4" /> Messages
                   {messageCount > 0 && (
                     <Badge variant="secondary" className="ml-auto">{messageCount}</Badge>
                   )}
-                </a>
+                </div>
+              </Link>
+              <Link href="/admin/material-submissions">
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer", location === "/admin/material-submissions" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <AlertCircle className="h-4 w-4" /> Material Submissions
+                </div>
+              </Link>
+            </>
+          )}
+
+          {isSupplierOrPurchase && (
+            <>
+              <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Supplier
+              </div>
+              <Link href="/supplier/materials">
+                <div
+                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer", location === "/supplier/materials" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Package className="h-4 w-4" /> Material Templates
+                </div>
               </Link>
             </>
           )}
@@ -213,9 +238,9 @@ export function Sidebar() {
               </div>
               {filteredEstimators.map((item) => (
                 <Link key={item.href} href={item.href}>
-                  <a
+                  <div
                     className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                       location === item.href
                         ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md"
                         : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -224,7 +249,7 @@ export function Sidebar() {
                   >
                     <item.icon className="h-4 w-4" />
                     {item.label}
-                  </a>
+                  </div>
                 </Link>
               ))}
             </>
@@ -235,10 +260,10 @@ export function Sidebar() {
             Resources
           </div>
           <Link href="/subscription">
-            <a className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent">
+            <div className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent cursor-pointer">
               <Package className="h-4 w-4" />
               Subscription
-            </a>
+            </div>
           </Link>
         </nav>
 

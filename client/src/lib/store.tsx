@@ -15,6 +15,11 @@ interface DataContextType {
   materials: Material[];
   approvalRequests?: any[];
   supportMessages?: any[];
+  pendingShops?: any[];
+  pendingMaterials?: any[];
+  materialApprovalRequests?: any[];
+  submitShopForApproval?: (shop: Partial<Shop>) => Promise<Shop | null>;
+  submitMaterialForApproval?: (mat: Partial<Material>) => Promise<Material | null>;
   addShop: (shop: Partial<Shop>) => Promise<void>;
   addMaterial: (mat: Partial<Material>) => Promise<void>;
   deleteShop: (id: string) => Promise<void>;
@@ -33,6 +38,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [approvalRequests, setApprovalRequests] = useState<any[]>([]);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
+  const [pendingShops, setPendingShops] = useState<any[]>(() => {
+    try { return JSON.parse(localStorage.getItem('pendingShopRequests') || '[]'); } catch { return []; }
+  });
+  const [pendingMaterials, setPendingMaterials] = useState<any[]>(() => {
+    try { return JSON.parse(localStorage.getItem('pendingMaterialRequests') || '[]'); } catch { return []; }
+  });
+  const [materialApprovalRequests, setMaterialApprovalRequests] = useState<any[]>([]);
+  const [flushAttemptCount, setFlushAttemptCount] = useState(0);
+  const [lastFlushTime, setLastFlushTime] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -45,79 +59,202 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const m = await getJSON('/materials');
         if (mounted && m?.materials) setMaterials(m.materials);
       } catch (e) { console.warn('load materials failed', e); }
+      // load server-side pending approval lists into central state
+      try {
+        const ps = await getJSON('/shops-pending-approval');
+        if (mounted && ps?.shops) setApprovalRequests(ps.shops);
+      } catch (e) { console.warn('load pending shops failed', e); }
+      try {
+        const pm = await getJSON('/materials-pending-approval');
+        if (mounted && pm?.materials) setMaterialApprovalRequests(pm.materials);
+      } catch (e) { console.warn('load pending materials failed', e); }
     })();
     return () => { mounted = false };
   }, []);
+
+  // persist pending queues to localStorage whenever they change
+  useEffect(() => {
+    try { localStorage.setItem('pendingShopRequests', JSON.stringify(pendingShops)); } catch (e) { /* ignore */ }
+  }, [pendingShops]);
+  useEffect(() => {
+    try { localStorage.setItem('pendingMaterialRequests', JSON.stringify(pendingMaterials)); } catch (e) { /* ignore */ }
+  }, [pendingMaterials]);
+
+  // helper to flush pending queues when a token becomes available
+  const flushPendingQueues = async () => {
+    const now = Date.now();
+    // Rate limit: don't try more than once per 5 seconds, and max 10 attempts total per session
+    if (now - lastFlushTime < 5000 || flushAttemptCount >= 10) {
+      return;
+    }
+    
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
+    if (!token) return;
+    
+    setFlushAttemptCount(c => c + 1);
+    setLastFlushTime(now);
+    
+    // try flush shops first
+    if (pendingShops.length > 0) {
+      const remaining: any[] = [];
+      for (const req of pendingShops) {
+        try {
+          const created = await submitShopForApproval(req.shop);
+          if (created && created.id) {
+            // refresh server pending list
+            try { const ps = await getJSON('/shops-pending-approval'); if (ps?.shops) setApprovalRequests(ps.shops); } catch (e) { console.warn('refresh pending shops failed', e); }
+            continue; // successful, don't keep
+          }
+        } catch (e) {
+          console.warn('flush pending shop failed', e);
+        }
+        remaining.push(req);
+      }
+      setPendingShops(remaining);
+    }
+
+    if (pendingMaterials.length > 0) {
+      const remainingMat: any[] = [];
+      for (const req of pendingMaterials) {
+        try {
+          const created = await submitMaterialForApproval(req.material);
+          if (created && created.id) {
+            try { const pm = await getJSON('/materials-pending-approval'); if (pm?.materials) setMaterialApprovalRequests(pm.materials); } catch (e) { console.warn('refresh pending materials failed', e); }
+            continue;
+          }
+        } catch (e) {
+          console.warn('flush pending material failed', e);
+        }
+        remainingMat.push(req);
+      }
+      setPendingMaterials(remainingMat);
+    }
+  };
+
+  // watch for auth token changes and user state to trigger flush (only once)
+  useEffect(() => {
+    const onStorage = (ev: StorageEvent) => {
+      if (ev.key === 'authToken' && ev.newValue) {
+        flushPendingQueues().catch((e) => console.warn('flush failed', e));
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  // try initial flush on mount when user is present
+  useEffect(() => {
+    if (user && pendingShops.length + pendingMaterials.length > 0) {
+      flushPendingQueues().catch(() => {});
+    }
+  }, [user]);
 
   const login = (u: User) => setUser(u);
   const logout = () => setUser(null);
 
   const addShop = async (shop: Partial<Shop>) => {
-    try {
-      const data = await postJSON('/shops', shop);
-      if (data?.shop) setShops((p) => [data.shop, ...p]);
-      return;
-    } catch (e) { console.warn('addShop failed', e); }
-    setShops((p) => [{ id: Math.random().toString(), name: shop.name || 'New Shop', ...(shop as any) }, ...p]);
+    const data = await postJSON('/shops', shop);
+    if (data?.shop) {
+      setShops((p) => [data.shop, ...p]);
+      return data.shop;
+    }
+    throw new Error('addShop: server did not return created shop');
   };
 
   const addMaterial = async (mat: Partial<Material>) => {
+    const data = await postJSON('/materials', mat);
+    if (data?.material) {
+      setMaterials((p) => [data.material, ...p]);
+      return data.material;
+    }
+    throw new Error('addMaterial: server did not return created material');
+  };
+
+  const submitShopForApproval = async (shop: Partial<Shop>) => {
+    try {
+      const data = await postJSON('/shops', shop);
+      return data?.shop || null;
+    } catch (e: any) {
+      console.warn('[submitShopForApproval] server submit failed, enqueueing locally', e?.message || e);
+      const req = { id: Math.random().toString(), shop };
+      setPendingShops((p) => [req, ...p]);
+      return null;
+    }
+  };
+
+  const submitMaterialForApproval = async (mat: Partial<Material>) => {
     try {
       const data = await postJSON('/materials', mat);
-      if (data?.material) setMaterials((p) => [data.material, ...p]);
-      return;
-    } catch (e) { console.warn('addMaterial failed', e); }
-    setMaterials((p) => [{ id: Math.random().toString(), name: mat.name || 'New', code: mat.code || '', rate: mat.rate || 0, ...(mat as any) }, ...p]);
+      return data?.material || null;
+    } catch (e: any) {
+      console.warn('[submitMaterialForApproval] server submit failed, enqueueing locally', e?.message || e);
+      const req = { id: Math.random().toString(), material: mat };
+      setPendingMaterials((p) => [req, ...p]);
+      return null;
+    }
   };
 
   const deleteShop = async (id: string) => {
+    console.log('[deleteShop] attempting to delete shop', id);
     try {
       const res = await apiFetch(`/shops/${id}`, { method: 'DELETE' });
-      if (res.ok) setShops((p) => p.filter(s => s.id !== id));
-    } catch (e) { console.warn('deleteShop failed', e); setShops((p) => p.filter(s => s.id !== id)); }
+      console.log('[deleteShop] response status:', res.status);
+      if (res.ok) {
+        // successful delete on server, update local list
+        console.log('[deleteShop] delete successful, removing from local list');
+        setShops((p) => p.filter(s => s.id !== id));
+        return;
+      }
+      // server returned non-ok response; log and fallthrough to re-sync
+      try { const txt = await res.text(); console.warn('[deleteShop] failed:', res.status, txt); } catch { console.warn('[deleteShop] failed:', res.status); }
+    } catch (e) {
+      console.warn('[deleteShop] exception:', e);
+    }
+    // Re-sync from server to restore accurate state when delete failed
+    console.log('[deleteShop] re-syncing from server');
+    try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('refresh shops failed', e); }
   };
 
   const deleteMaterial = async (id: string) => {
+    console.log('[deleteMaterial] attempting to delete material', id);
     try {
       const res = await apiFetch(`/materials/${id}`, { method: 'DELETE' });
-      if (res.ok) setMaterials((p) => p.filter(m => m.id !== id));
-    } catch (e) { console.warn('deleteMaterial failed', e); setMaterials((p) => p.filter(m => m.id !== id)); }
+      console.log('[deleteMaterial] response status:', res.status);
+      if (res.ok) {
+        console.log('[deleteMaterial] delete successful, removing from local list');
+        setMaterials((p) => p.filter(m => m.id !== id));
+        return;
+      }
+      try { const txt = await res.text(); console.warn('[deleteMaterial] failed:', res.status, txt); } catch { console.warn('[deleteMaterial] failed:', res.status); }
+    } catch (e) {
+      console.warn('[deleteMaterial] exception:', e);
+    }
+    console.log('[deleteMaterial] re-syncing from server');
+    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { console.warn('refresh materials failed', e); }
   };
 
   const approveShop = async (id: string) => {
-    try {
-      const data = await postJSON(`/shops/${id}/approve`, {});
-      try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { }
-      return data?.shop;
-    } catch (e) { console.warn('approveShop failed', e); }
-    return null;
+    const data = await postJSON(`/shops/${id}/approve`, {});
+    try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('approveShop refresh failed', e); }
+    return data?.shop;
   };
 
   const rejectShop = async (id: string, reason?: string|null) => {
-    try {
-      const data = await postJSON(`/shops/${id}/reject`, { reason });
-      try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { }
-      return data?.shop;
-    } catch (e) { console.warn('rejectShop failed', e); }
-    return null;
+    const data = await postJSON(`/shops/${id}/reject`, { reason });
+    try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('rejectShop refresh failed', e); }
+    return data?.shop;
   };
 
   const approveMaterial = async (id: string) => {
-    try {
-      const data = await postJSON(`/materials/${id}/approve`, {});
-      try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { }
-      return data?.material;
-    } catch (e) { console.warn('approveMaterial failed', e); }
-    return null;
+    const data = await postJSON(`/materials/${id}/approve`, {});
+    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { console.warn('approveMaterial refresh failed', e); }
+    return data?.material;
   };
 
   const rejectMaterial = async (id: string, reason?: string|null) => {
-    try {
-      const data = await postJSON(`/materials/${id}/reject`, { reason });
-      try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { }
-      return data?.material;
-    } catch (e) { console.warn('rejectMaterial failed', e); }
-    return null;
+    const data = await postJSON(`/materials/${id}/reject`, { reason });
+    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { console.warn('rejectMaterial refresh failed', e); }
+    return data?.material;
   };
 
   const contextValue: DataContextType = {
@@ -128,6 +265,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     materials,
     approvalRequests,
     supportMessages,
+    pendingShops,
+    pendingMaterials,
+    materialApprovalRequests,
     addShop,
     addMaterial,
     deleteShop,
@@ -136,6 +276,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     rejectShop,
     approveMaterial,
     rejectMaterial,
+    submitShopForApproval,
+    submitMaterialForApproval,
   };
 
   return (

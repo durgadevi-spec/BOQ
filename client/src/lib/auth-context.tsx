@@ -29,9 +29,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Update global token whenever token state changes
+  // Update global token whenever token state changes; persist to localStorage
+  // Restore token from localStorage on mount so login persists across page refreshes
   useEffect(() => {
+    const stored = localStorage.getItem('authToken');
+    console.log('[AuthProvider] mount: stored token?', !!stored, 'length:', stored?.length || 0);
+    if (stored) {
+      console.log('[AuthProvider] restoring token from localStorage');
+      setToken(stored);
+      setAuthToken(stored);
+    }
+  }, []);
+
+  // Update global token whenever token state changes; persist to localStorage.
+  // Do NOT remove the stored token automatically when `token` becomes null during mount
+  // (that could clear a restored token). Only persist when a real token is set.
+  useEffect(() => {
+    console.log('[AuthProvider] token state changed, token?', !!token, 'calling setAuthToken');
     setAuthToken(token);
+    if (token) {
+      console.log('[AuthProvider] saving token to localStorage');
+      localStorage.setItem('authToken', token);
+    }
   }, [token]);
 
   const login = async (username: string, password: string) => {
@@ -77,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     setUser(null);
     setToken(null);
+    try { localStorage.removeItem('authToken'); } catch (e) { /* ignore */ }
   };
 
   return (

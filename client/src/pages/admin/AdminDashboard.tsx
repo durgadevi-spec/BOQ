@@ -198,7 +198,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/master-materials');
+        const res = await fetch('/api/materials');
         if (res.ok) {
           const data = await res.json();
           setMasterMaterials(data?.materials || []);
@@ -241,34 +241,14 @@ export default function AdminDashboard() {
   const [shopRequests, setShopRequests] = useState<any[]>([]);
   const [supportMsgs, setSupportMsgs] = useState<any[]>([]);
 
-  // Fetch approval requests and support messages from API
+  // initialize local request lists from central store's approval lists
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch('/api/materials-pending-approval');
-        if (res.ok) {
-          const data = await res.json();
-          setMaterialRequests(data?.materials || []);
-        }
-      } catch (e) {
-        console.warn('load material requests failed', e);
-      }
-    })();
-  }, []);
+    setShopRequests(approvalRequests || []);
+  }, [approvalRequests]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch('/api/shops-pending-approval');
-        if (res.ok) {
-          const data = await res.json();
-          setShopRequests(data?.shops || []);
-        }
-      } catch (e) {
-        console.warn('load shop requests failed', e);
-      }
-    })();
-  }, []);
+    setMaterialRequests(materialApprovalRequests || []);
+  }, [materialApprovalRequests]);
 
   useEffect(() => {
     // initialize local copies from store
@@ -458,37 +438,81 @@ export default function AdminDashboard() {
       return;
     }
 
-    const newRequest = {
-      id: Math.random().toString(),
-      shop: { ...newShop },
-      submittedBy: user?.name,
-      submittedAt: new Date().toISOString(),
-      status: "pending",
-    };
-
-    setShopRequests((prev: any[]) => [...prev, newRequest]);
-    setNewShop({
-      name: "",
-      location: "",
-      city: "",
-      phoneCountryCode: "+91",
-      state: "",
-      country: "",
-      pincode: "",
-      gstNo: "",
-    });
-    toast({
-      title: "Success",
-      description:
-        "Shop submitted for approval. Software team will review and approve/reject.",
-    });
-  };
-
-  const handleApproveShop = (requestId: string) => {
     (async () => {
       try {
-        await approveShop?.(requestId);
-        setShopRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
+        // Try to submit to server (requires auth). If it succeeds, use server id.
+        let created: any = null;
+        if (typeof submitShopForApproval === 'function') {
+          created = await submitShopForApproval({ ...newShop });
+        } else {
+          console.warn('[handleAddShop] submitShopForApproval missing from useData; falling back to local save');
+        }
+        if (created && created.id) {
+          const serverRequest = {
+            id: created.id,
+            shop: created,
+            submittedBy: user?.name,
+            submittedAt: new Date().toISOString(),
+            status: "pending",
+          };
+          setShopRequests((prev: any[]) => [serverRequest, ...prev]);
+          setActiveTab('approvals');
+          toast({ title: "Success", description: "Shop submitted for approval (server)" });
+        } else {
+          // fallback to local pending request
+          const newRequest = {
+            id: Math.random().toString(),
+            shop: { ...newShop },
+            submittedBy: user?.name,
+            submittedAt: new Date().toISOString(),
+            status: "pending",
+          };
+          setShopRequests((prev: any[]) => [newRequest, ...prev]);
+          setActiveTab('approvals');
+          toast({ title: "Saved Locally", description: "Shop saved locally; will sync when server is available" });
+        }
+      } catch (err: any) {
+        console.warn('submit shop failed', err);
+        const msg = err?.message || String(err);
+        const newRequest = {
+          id: Math.random().toString(),
+          shop: { ...newShop },
+          submittedBy: user?.name,
+          submittedAt: new Date().toISOString(),
+          status: "pending",
+        };
+        setShopRequests((prev: any[]) => [newRequest, ...prev]);
+        setActiveTab('approvals');
+        if (msg.includes('401') || /unauthori/i.test(msg)) {
+          toast({ title: "Saved Locally (Unauthorized)", description: "You are not logged in as admin — please log in to submit to server.", variant: 'destructive' });
+        } else {
+          toast({ title: "Saved Locally", description: `Shop saved locally; server submit failed: ${msg}`, variant: 'destructive' });
+        }
+      } finally {
+        setNewShop({
+          name: "",
+          location: "",
+          city: "",
+          phoneCountryCode: "+91",
+          state: "",
+          country: "",
+          pincode: "",
+          gstNo: "",
+        });
+      }
+    })();
+  };
+
+  const handleApproveShop = (request: any) => {
+    (async () => {
+      try {
+        const shopId = request?.shop?.id;
+        if (!shopId) {
+          toast({ title: "Cannot Approve", description: "This shop is saved locally and has not been submitted to the server.", variant: 'destructive' });
+          return;
+        }
+        await approveShop?.(shopId);
+        setShopRequests((prev: any[]) => prev.filter((r: any) => r.id !== request.id));
         toast({ title: "Approved", description: "Shop has been approved and added to the system" });
       } catch (e) {
         toast({ title: "Error", description: "Failed to approve shop", variant: "destructive" });
@@ -496,7 +520,7 @@ export default function AdminDashboard() {
     })();
   };
 
-  const handleRejectShop = (requestId: string) => {
+  const handleRejectShop = (request: any) => {
     if (!rejectReason.trim()) {
       toast({
         title: "Error",
@@ -507,13 +531,46 @@ export default function AdminDashboard() {
     }
     (async () => {
       try {
-        await rejectShop?.(requestId, rejectReason);
-        setShopRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
+        const shopId = request?.shop?.id;
+        if (!shopId) {
+          // If there's no server id, just remove the local request
+          setShopRequests((prev: any[]) => prev.filter((r: any) => r.id !== request.id));
+          setRejectingId(null);
+          setRejectReason("");
+          toast({ title: "Removed", description: "Local shop request removed" });
+          return;
+        }
+        await rejectShop?.(shopId, rejectReason);
+        setShopRequests((prev: any[]) => prev.filter((r: any) => r.id !== request.id));
         setRejectingId(null);
         setRejectReason("");
         toast({ title: "Rejected", description: "Shop has been rejected" });
       } catch (e) {
         toast({ title: "Error", description: "Failed to reject shop", variant: "destructive" });
+      }
+    })();
+  };
+
+  const handleApproveMaterial = (requestId: string) => {
+    (async () => {
+      try {
+        await approveMaterial?.(requestId);
+        setMaterialRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
+        toast({ title: "Approved", description: "Material has been approved and added to the system" });
+      } catch (e) {
+        toast({ title: "Error", description: "Failed to approve material", variant: "destructive" });
+      }
+    })();
+  };
+
+  const handleRejectMaterial = (requestId: string) => {
+    (async () => {
+      try {
+        await rejectMaterial?.(requestId, "Rejected by admin");
+        setMaterialRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
+        toast({ title: "Rejected", description: "Material has been rejected" });
+      } catch (e) {
+        toast({ title: "Error", description: "Failed to reject material", variant: "destructive" });
       }
     })();
   };
@@ -660,7 +717,46 @@ export default function AdminDashboard() {
               <Card>
                 <CardHeader>
                   <CardTitle>All Shops</CardTitle>
-                  <CardDescription className="text-sm">List of shops (compact)</CardDescription>
+                  <div className="flex items-center justify-between">
+                    <CardDescription className="text-sm">List of shops (compact)</CardDescription>
+                    <div>
+                      <Button size="sm" onClick={async () => {
+                        try {
+                          // fetch approved shops
+                          const res = await fetch('/api/shops');
+                          if (!res.ok) throw new Error('failed to fetch approved shops');
+                          const data = await res.json();
+                          const approved = data?.shops || [];
+
+                          // fetch pending shop requests (admin view)
+                          let pending: any[] = [];
+                          try {
+                            const pres = await fetch('/api/shops-pending-approval');
+                            if (pres.ok) {
+                              const pdata = await pres.json();
+                              // api returns { shops: [{ id, status, shop }] }
+                              pending = (pdata?.shops || []).map((r: any) => ({ ...r.shop, _pendingRequestId: r.id }));
+                            }
+                          } catch (err) {
+                            // ignore pending fetch errors
+                            console.warn('fetch pending shops failed', err);
+                          }
+
+                          // merge approved + pending (avoid duplicates by id)
+                          const merged = [...approved];
+                          for (const p of pending) {
+                            if (!merged.some((a: any) => a.id === p.id)) merged.push(p);
+                          }
+
+                          setLocalShops(merged);
+                          toast({ title: 'Refreshed', description: 'Shops refreshed from server (approved + pending)' });
+                        } catch (e) {
+                          console.warn('refresh shops failed', e);
+                          toast({ title: 'Error', description: 'Failed to refresh shops', variant: 'destructive' });
+                        }
+                      }}>Refresh</Button>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="mb-2">
@@ -1446,16 +1542,9 @@ export default function AdminDashboard() {
                             <div className="flex gap-2">
                               <Button
                                 size="sm"
-                                onClick={() =>
-                                  setShopRequests((prev: any[]) =>
-                                    prev.map((r: any) =>
-                                      r.id === request.id
-                                        ? { ...r, status: "approved" }
-                                        : r
-                                    )
-                                  )
-                                }
+                                onClick={() => handleApproveShop(request)}
                                 className="gap-2"
+                                disabled={!request?.shop?.id}
                               >
                                 <CheckCircle2 className="h-4 w-4" /> Approve
                               </Button>
@@ -1536,8 +1625,10 @@ export default function AdminDashboard() {
                                     : "destructive"
                                 }
                               >
-                                {request.status.charAt(0).toUpperCase() +
-                                  request.status.slice(1)}
+                                {request.status === "approved"
+                                  ? "LA"
+                                  : request.status.charAt(0).toUpperCase() +
+                                    request.status.slice(1)}
                               </Badge>
                             </div>
                           </div>
@@ -1611,15 +1702,7 @@ export default function AdminDashboard() {
                           <div className="flex gap-2">
                             <Button
                               size="sm"
-                              onClick={() =>
-                                setMaterialRequests((prev: any[]) =>
-                                  prev.map((r: any) =>
-                                    r.id === request.id
-                                      ? { ...r, status: "approved" }
-                                      : r
-                                  )
-                                )
-                              }
+                              onClick={() => handleApproveMaterial(request.id)}
                               className="gap-2"
                             >
                               <CheckCircle2 className="h-4 w-4" /> Approve
@@ -1627,15 +1710,7 @@ export default function AdminDashboard() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() =>
-                                setMaterialRequests((prev: any[]) =>
-                                  prev.map((r: any) =>
-                                    r.id === request.id
-                                      ? { ...r, status: "rejected" }
-                                      : r
-                                  )
-                                )
-                              }
+                              onClick={() => handleRejectMaterial(request.id)}
                               className="gap-2"
                             >
                               <XCircle className="h-4 w-4" /> Reject

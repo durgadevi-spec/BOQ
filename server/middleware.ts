@@ -19,18 +19,22 @@ export function authMiddleware(
   next: NextFunction
 ): void {
   const authHeader = req.headers.authorization;
+  console.log('[authMiddleware] authorization header:', authHeader);
   const token = extractTokenFromHeader(authHeader);
 
   if (!token) {
+    console.log('[authMiddleware] no token provided');
     res.status(401).json({ message: "Unauthorized: No token provided" });
     return;
   }
 
   const decoded = verifyToken(token);
   if (!decoded) {
+    console.log('[authMiddleware] token verification failed for token:', token.substring(0, 20) + '...');
     res.status(401).json({ message: "Unauthorized: Invalid token" });
     return;
   }
+  console.log('[authMiddleware] token verified for user:', decoded.username, 'role:', decoded.role);
 
   req.user = {
     id: decoded.id,

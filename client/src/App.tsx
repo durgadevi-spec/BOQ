@@ -1,6 +1,7 @@
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { AuthProvider } from "./lib/auth-context";
 import { DataProvider } from "./lib/store";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,6 +23,8 @@ import SSWorkEstimator from "@/pages/estimators/SSWorkEstimator";
 import FireFightingEstimator from "@/pages/estimators/FireFightingEstimator";
 import ItemMaster from "@/pages/ItemMaster";
 import Subscription from "@/pages/Subscription";
+import SupplierMaterials from "@/pages/supplier/SupplierMaterials";
+import MaterialSubmissionApproval from "@/pages/admin/MaterialSubmissionApproval";
 
 function Router() {
   return (
@@ -44,6 +47,8 @@ function Router() {
       <Route path="/estimators/fire-fighting" component={FireFightingEstimator} />
       <Route path="/item-master" component={ItemMaster} />
       <Route path="/admin/dashboard" component={AdminDashboard} />
+      <Route path="/admin/material-submissions" component={MaterialSubmissionApproval} />
+      <Route path="/supplier/materials" component={SupplierMaterials} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -52,12 +57,14 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <DataProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </DataProvider>
+      <AuthProvider>
+        <DataProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </DataProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

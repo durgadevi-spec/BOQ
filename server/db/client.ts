@@ -1,13 +1,4 @@
 import pg from "pg";
-import dotenv from "dotenv";
-
-/**
- * Load .env only in local development
- * Render injects env vars automatically
- */
-if (process.env.NODE_ENV !== "production") {
-  dotenv.config();
-}
 
 const connectionString =
   process.env.DATABASE_URL ||

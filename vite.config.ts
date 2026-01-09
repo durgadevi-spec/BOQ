@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import path from "path";
 import { metaImagesPlugin } from "./vite-plugin-meta-images";
+import { fileURLToPath, URL } from "node:url";
 
-// Only load dev plugins if in development
+// Detect development
 const isDev = process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined;
 
 // Lazy load dev-only plugins
@@ -21,7 +21,11 @@ async function getDevPlugins() {
 export default defineConfig(async () => {
   const devPlugins = await getDevPlugins();
 
+  const clientPath = fileURLToPath(new URL("../client", import.meta.url));
+  const distPath = fileURLToPath(new URL("../dist/public", import.meta.url));
+
   return {
+    root: clientPath,
     plugins: [
       react(),
       tailwindcss(),
@@ -30,19 +34,13 @@ export default defineConfig(async () => {
     ],
     resolve: {
       alias: {
-        "@": path.resolve(import.meta.url, "../client/src"),
-        "@shared": path.resolve(import.meta.url, "../shared"),
-        "@assets": path.resolve(import.meta.url, "../attached_assets"),
+        "@": fileURLToPath(new URL("../client/src", import.meta.url)),
+        "@shared": fileURLToPath(new URL("../shared", import.meta.url)),
+        "@assets": fileURLToPath(new URL("../attached_assets", import.meta.url)),
       },
     },
-    css: {
-      postcss: {
-        plugins: [],
-      },
-    },
-    root: path.resolve(import.meta.url, "../client"),
     build: {
-      outDir: path.resolve(import.meta.url, "../dist/public"),
+      outDir: distPath,
       emptyOutDir: true,
     },
     server: {

@@ -4,29 +4,29 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./lib/auth-context";
 import { DataProvider } from "./lib/store";
 import { Toaster } from "./components/ui/toaster";
+import { TooltipProvider } from "./components/ui/tooltip";
 
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
-import Login from "@/pages/Login";
-import Signup from "@/pages/Signup";
-import Dashboard from "@/pages/Dashboard";
-import AdminDashboard from "@/pages/admin/AdminDashboard";
-import CivilWallEstimator from "@/pages/estimators/CivilWallEstimator";
-import FlooringEstimator from "@/pages/estimators/FlooringEstimator";
-import FalseCeilingEstimator from "@/pages/estimators/FalseCeilingEstimator";
-import PaintingEstimator from "@/pages/estimators/PaintingEstimator";
-import DoorsEstimator from "@/pages/estimators/DoorsEstimator";
-import BlindsEstimator from "@/pages/estimators/BlindsEstimator";
-import ElectricalEstimator from "@/pages/estimators/ElectricalEstimator";
-import PlumbingEstimator from "@/pages/estimators/PlumbingEstimator";
-import MSWorkEstimator from "@/pages/estimators/MSWorkEstimator";
-import SSWorkEstimator from "@/pages/estimators/SSWorkEstimator";
-import FireFightingEstimator from "@/pages/estimators/FireFightingEstimator";
-import ItemMaster from "@/pages/ItemMaster";
-import Subscription from "@/pages/Subscription";
-import SupplierMaterials from "@/pages/supplier/SupplierMaterials";
-import SupplierShops from "@/pages/supplier/SupplierShops";
-import MaterialSubmissionApproval from "@/pages/admin/MaterialSubmissionApproval";
+import NotFound from "./pages/not-found";
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import Dashboard from "./pages/Dashboard";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import CivilWallEstimator from "./pages/estimators/CivilWallEstimator";
+import FlooringEstimator from "./pages/estimators/FlooringEstimator";
+import FalseCeilingEstimator from "./pages/estimators/FalseCeilingEstimator";
+import PaintingEstimator from "./pages/estimators/PaintingEstimator";
+import DoorsEstimator from "./pages/estimators/DoorsEstimator";
+import BlindsEstimator from "./pages/estimators/BlindsEstimator";
+import ElectricalEstimator from "./pages/estimators/ElectricalEstimator";
+import PlumbingEstimator from "./pages/estimators/PlumbingEstimator";
+import MSWorkEstimator from "./pages/estimators/MSWorkEstimator";
+import SSWorkEstimator from "./pages/estimators/SSWorkEstimator";
+import FireFightingEstimator from "./pages/estimators/FireFightingEstimator";
+import ItemMaster from "./pages/ItemMaster";
+import Subscription from "./pages/Subscription";
+import SupplierMaterials from "./pages/supplier/SupplierMaterials";
+import SupplierShops from "./pages/supplier/SupplierShops";
+import MaterialSubmissionApproval from "./pages/admin/MaterialSubmissionApproval";
 
 function Router() {
   return (
@@ -35,7 +35,7 @@ function Router() {
       <Route path="/signup" component={Signup} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/subscription" component={Subscription} />
-      
+
       <Route path="/estimators/civil-wall" component={CivilWallEstimator} />
       <Route path="/estimators/flooring" component={FlooringEstimator} />
       <Route path="/estimators/false-ceiling" component={FalseCeilingEstimator} />

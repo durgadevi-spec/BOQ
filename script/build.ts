@@ -1,9 +1,12 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // server deps to bundle to reduce openat(2) syscalls
-// which helps cold start times
 const allowlist = [
   "@google/generative-ai",
   "axios",
@@ -33,25 +36,40 @@ const allowlist = [
 ];
 
 async function buildAll() {
-  await rm("dist", { recursive: true, force: true });
+  await rm(path.resolve(__dirname, "../dist"), {
+    recursive: true,
+    force: true,
+  });
 
+  /* ================= CLIENT ================= */
   console.log("building client...");
-  await viteBuild();
+  await viteBuild({
+    root: path.resolve(__dirname, "../client"),
+    build: {
+      outDir: path.resolve(__dirname, "../dist/public"),
+      emptyOutDir: true,
+    },
+  });
 
+  /* ================= SERVER ================= */
   console.log("building server...");
-  const pkg = JSON.parse(await readFile("package.json", "utf-8"));
+  const pkg = JSON.parse(
+    await readFile(path.resolve(__dirname, "../package.json"), "utf-8")
+  );
+
   const allDeps = [
     ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.devDependencies || {}),
   ];
+
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
   await esbuild({
-    entryPoints: ["server/index.ts"],
+    entryPoints: [path.resolve(__dirname, "../server/index.ts")],
     platform: "node",
     bundle: true,
     format: "cjs",
-    outfile: "dist/index.cjs",
+    outfile: path.resolve(__dirname, "../dist/index.cjs"),
     define: {
       "process.env.NODE_ENV": '"production"',
     },
